@@ -5,8 +5,7 @@ export default function MenuScreen({ onStart }) {
 
   return (
     <div style={containerStyle}>
-      <h1 style={{ color: '#f5f5dc', fontSize: 36, marginBottom: 8 }}>Backgammon</h1>
-      <p style={{ color: '#d4a574', marginBottom: 24 }}>Online</p>
+      <h1 style={{ color: '#f5f5dc', fontSize: 36, marginBottom: 24 }}>Lumpzammon</h1>
       <input
         type="text"
         placeholder="Enter your nickname"
