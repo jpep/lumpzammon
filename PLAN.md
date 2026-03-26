@@ -31,7 +31,7 @@ The board and screens are functional but visually basic. This phase brings them 
 - [x] **Casino theme** - Old-style casino look: black/white, red buttons, gold accents, centralized in `theme.js`
 - [x] **Landing title** - "Lumpzammon!" with exclamation mark on MenuScreen
 - [ ] **Board aesthetics** - Wood textures, shadows, rounded triangles, point numbering
-- [ ] **Checker animations** - Smooth CSS transitions for moves, bar hits, bearing off
+- [x] **Checker animations** - Smooth CSS transitions for moves, bar hits, bearing off
 - [ ] **Dice roll animation** - Tumble/spin before revealing values
 - [ ] **Sound effects** - Dice roll, checker place, hit, bear off, win
 - [x] **Turn indicator** - Player names with stone icons, (you!) tag, action label next to active player

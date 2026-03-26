@@ -107,6 +107,17 @@ All game rules live in `src/game/logic.js` as pure functions with no dependencie
 - Plays all available dice sequentially
 - Moves are applied one at a time with 750ms delays between each, so the player can follow each individual stone movement. The AI auto-rolls after 800ms.
 
+### Move Animation
+
+When a piece moves (player or AI), instead of teleporting, a **flying checker** smoothly translates from the source to the destination using CSS transitions (300ms ease-in-out). The system works by:
+
+1. Computing screen coordinates of source and destination elements via `data-point-id` / `data-bar-player` DOM attributes and `getBoundingClientRect()`
+2. Hiding the top checker at the source point (opacity: 0)
+3. Rendering a `position: fixed` Checker overlay that transitions from source to destination coordinates
+4. After the animation completes, removing the overlay and applying the actual game state update
+
+This applies to all move types: point-to-point, bar-to-point, and point-to-off, for both human and AI players. An `isAnimatingRef` prevents input during animation.
+
 ### Game Modes
 
 | Mode    | How it works                                                    |
