@@ -99,6 +99,7 @@ The current AI is a single-step greedy evaluator. It works but is beatable.
 - [ ] **Custom domain** - Optional: configure CNAME for a custom domain
 - [ ] **Firebase env separation** - Separate Firebase projects for dev vs prod
 - [ ] **CI checks** - Add lint + test steps to the GitHub Actions workflow
+- [x] **Build info overlay** - Info icon (bottom-left) shows commit hash, message, author, date
 - [ ] **Docker prod optimization** - Minimize image size, add health checks
 
 ---

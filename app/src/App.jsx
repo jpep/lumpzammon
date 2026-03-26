@@ -5,6 +5,7 @@ import LobbyScreen from './screens/LobbyScreen';
 import GameScreen from './screens/GameScreen';
 import KickedScreen from './screens/KickedScreen';
 import AdminPanel from './components/AdminPanel';
+import BuildInfo from './components/BuildInfo';
 import useOnlineMatch from './hooks/useOnlineMatch';
 import useKickDetection from './hooks/useKickDetection';
 
@@ -87,6 +88,8 @@ export default function App() {
           onBack={handleBack}
         />
       )}
+
+      <BuildInfo />
 
       {/* Admin toggle (Ctrl+Shift+A) */}
       {showAdmin && <AdminPanel onClose={() => setShowAdmin(false)} />}

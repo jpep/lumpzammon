@@ -52,7 +52,8 @@ lumpzammon/
         │   ├── Checker.jsx        # Game piece (white/black)
         │   ├── DiceFace.jsx       # Die face with dot layout
         │   ├── BarZone.jsx        # Captured pieces area
-        │   └── AdminPanel.jsx     # Match management overlay
+        │   ├── AdminPanel.jsx     # Match management overlay
+        │   └── BuildInfo.jsx      # Deploy info (commit, author, date)
         ├── screens/               # Full-page views
         │   ├── MenuScreen.jsx     # Nickname entry
         │   ├── ModeSelectScreen.jsx # Mode picker
