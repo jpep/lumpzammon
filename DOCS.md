@@ -105,6 +105,7 @@ All game rules live in `src/game/logic.js` as pure functions with no dependencie
 - Scores board positions based on: borne-off pieces, bar pieces, blots, coverage, pip distance
 - Picks the highest-scoring move at each step (no lookahead)
 - Plays all available dice sequentially
+- Moves are applied one at a time with 750ms delays between each, so the player can follow each individual stone movement. The AI auto-rolls after 800ms.
 
 ### Game Modes
 
