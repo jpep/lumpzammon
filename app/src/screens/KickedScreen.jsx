@@ -1,10 +1,11 @@
 import React from 'react';
+import theme from '../theme';
 
 export default function KickedScreen({ onBack }) {
   return (
     <div style={containerStyle}>
-      <h2 style={{ color: '#f5f5dc', marginBottom: 12 }}>Disconnected</h2>
-      <p style={{ color: '#d4a574', marginBottom: 24 }}>
+      <h2 style={{ color: theme.text, marginBottom: 12 }}>Disconnected</h2>
+      <p style={{ color: theme.textSecondary, marginBottom: 24 }}>
         The match has ended or you were disconnected.
       </p>
       <button onClick={onBack} style={btnStyle}>
@@ -20,12 +21,12 @@ const containerStyle = {
   alignItems: 'center',
   justifyContent: 'center',
   minHeight: '100vh',
-  background: '#1a0f00',
+  background: theme.bg,
 };
 
 const btnStyle = {
-  background: '#8b4513',
-  color: '#f5f5dc',
+  background: theme.btnBg,
+  color: theme.btnText,
   border: 'none',
   borderRadius: 8,
   padding: '12px 32px',

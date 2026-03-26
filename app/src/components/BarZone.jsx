@@ -1,5 +1,6 @@
 import React from 'react';
 import Checker from './Checker';
+import theme from '../theme';
 
 export default function BarZone({ bar, onClickBar, selectedFrom }) {
   return (
@@ -9,11 +10,10 @@ export default function BarZone({ bar, onClickBar, selectedFrom }) {
       alignItems: 'center',
       justifyContent: 'center',
       width: 50,
-      background: '#3d2b1f',
+      background: theme.bgBar,
       gap: 8,
       padding: '8px 0',
     }}>
-      {/* P2 bar (top) */}
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
         {Array.from({ length: bar[2] }, (_, i) => (
           <Checker
@@ -25,7 +25,6 @@ export default function BarZone({ bar, onClickBar, selectedFrom }) {
         ))}
       </div>
       <div style={{ flex: 1 }} />
-      {/* P1 bar (bottom) */}
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
         {Array.from({ length: bar[1] }, (_, i) => (
           <Checker

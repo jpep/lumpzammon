@@ -113,6 +113,10 @@ All game rules live in `src/game/logic.js` as pure functions with no dependencie
 | vs AI   | Player is white (P1), AI is black (P2), auto-rolls and moves   |
 | Online  | Two players via Firebase: one creates, one joins from lobby     |
 
+### Theme
+
+All colors are centralized in `src/theme.js` — old-style casino aesthetic with black backgrounds, white text, dark red buttons, and gold accents. To change the look, edit theme.js.
+
 ### Status Bar
 
 Each player is shown with a rendered stone icon (white/black gradient) and their nickname. In online and AI modes, a green **(you!)** tag marks the local player. The active player's name highlights in yellow with an action label ("Roll dice" or "Move") inline towards the center.

@@ -2,6 +2,7 @@ import React from 'react';
 import Point from './Point';
 import BarZone from './BarZone';
 import { TOP_IDX, BOT_IDX } from '../game/logic';
+import theme from '../theme';
 
 export default function Board({
   gameState,
@@ -46,15 +47,18 @@ export default function Board({
     </div>
   );
 
+  const offHighlight = highlightedTargets.has('off');
+
   return (
     <div style={{
       display: 'flex',
       flexDirection: 'column',
-      background: '#2d5016',
-      border: '8px solid #5c3a21',
+      background: theme.bgBoard,
+      border: `8px solid ${theme.borderBoard}`,
       borderRadius: 12,
       overflow: 'hidden',
       width: 'fit-content',
+      boxShadow: `0 0 20px rgba(0,0,0,0.8), inset 0 0 30px rgba(0,0,0,0.3)`,
     }}>
       {/* Top half */}
       <div style={{ display: 'flex' }}>
@@ -65,24 +69,23 @@ export default function Board({
         <div style={{ display: 'flex' }}>
           {renderHalf(TOP_IDX.slice(7), true)}
         </div>
-        {/* Bear-off zone */}
         <div
-          onClick={highlightedTargets.has('off') ? onClickOff : undefined}
+          onClick={offHighlight ? onClickOff : undefined}
           style={{
             width: 50,
-            background: highlightedTargets.has('off') ? '#5c8a2f' : '#3d2b1f',
+            background: offHighlight ? theme.bgBearoffActive : theme.bgBearoff,
             display: 'flex',
             flexDirection: 'column',
             alignItems: 'center',
             justifyContent: 'flex-start',
             padding: 4,
-            cursor: highlightedTargets.has('off') ? 'pointer' : 'default',
+            cursor: offHighlight ? 'pointer' : 'default',
             gap: 2,
           }}
         >
           {off[2] > 0 && (
-            <div style={{ color: '#fff', fontSize: 12, fontWeight: 'bold' }}>
-              P2: {off[2]}
+            <div style={{ color: theme.text, fontSize: 12, fontWeight: 'bold' }}>
+              {off[2]}
             </div>
           )}
         </div>
@@ -98,22 +101,22 @@ export default function Board({
           {renderHalf(BOT_IDX.slice(7), false)}
         </div>
         <div
-          onClick={highlightedTargets.has('off') ? onClickOff : undefined}
+          onClick={offHighlight ? onClickOff : undefined}
           style={{
             width: 50,
-            background: highlightedTargets.has('off') ? '#5c8a2f' : '#3d2b1f',
+            background: offHighlight ? theme.bgBearoffActive : theme.bgBearoff,
             display: 'flex',
             flexDirection: 'column',
             alignItems: 'center',
             justifyContent: 'flex-end',
             padding: 4,
-            cursor: highlightedTargets.has('off') ? 'pointer' : 'default',
+            cursor: offHighlight ? 'pointer' : 'default',
             gap: 2,
           }}
         >
           {off[1] > 0 && (
-            <div style={{ color: '#fff', fontSize: 12, fontWeight: 'bold' }}>
-              P1: {off[1]}
+            <div style={{ color: theme.text, fontSize: 12, fontWeight: 'bold' }}>
+              {off[1]}
             </div>
           )}
         </div>

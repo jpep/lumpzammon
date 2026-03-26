@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import theme from '../theme';
 
 export default function BuildInfo() {
   const [open, setOpen] = useState(false);
@@ -14,14 +15,14 @@ export default function BuildInfo() {
           width: 28,
           height: 28,
           borderRadius: '50%',
-          background: '#2c1810',
-          border: '1px solid #8b4513',
+          background: theme.bgPanel,
+          border: `1px solid ${theme.border}`,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
           cursor: 'pointer',
           zIndex: 50,
-          color: '#d4a574',
+          color: theme.gold,
           fontSize: 16,
           fontFamily: 'serif',
           fontStyle: 'italic',
@@ -39,11 +40,11 @@ export default function BuildInfo() {
             position: 'fixed',
             bottom: 42,
             left: 8,
-            background: '#2c1810',
-            border: '1px solid #8b4513',
+            background: theme.bgPanel,
+            border: `1px solid ${theme.border}`,
             borderRadius: 8,
             padding: '10px 14px',
-            color: '#f5f5dc',
+            color: theme.text,
             fontSize: 12,
             lineHeight: 1.6,
             zIndex: 50,

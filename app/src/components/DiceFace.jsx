@@ -1,4 +1,5 @@
 import React from 'react';
+import theme from '../theme';
 
 const DOT_POSITIONS = {
   1: [[1,1]],
@@ -17,7 +18,7 @@ export default function DiceFace({ value, used, onClick }) {
       style={{
         width: 48,
         height: 48,
-        background: used ? '#666' : '#fffff0',
+        background: used ? theme.diceUsedBg : theme.diceBg,
         borderRadius: 8,
         display: 'grid',
         gridTemplateColumns: 'repeat(3, 1fr)',
@@ -26,7 +27,7 @@ export default function DiceFace({ value, used, onClick }) {
         gap: 2,
         opacity: used ? 0.4 : 1,
         cursor: onClick ? 'pointer' : 'default',
-        boxShadow: '0 2px 6px rgba(0,0,0,0.3)',
+        boxShadow: '0 2px 6px rgba(0,0,0,0.5)',
       }}
     >
       {Array.from({ length: 9 }, (_, i) => {
@@ -38,7 +39,7 @@ export default function DiceFace({ value, used, onClick }) {
             key={i}
             style={{
               borderRadius: '50%',
-              background: hasDot ? (used ? '#444' : '#1a0f00') : 'transparent',
+              background: hasDot ? (used ? theme.diceUsedDot : theme.diceDot) : 'transparent',
             }}
           />
         );

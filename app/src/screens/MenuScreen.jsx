@@ -1,11 +1,13 @@
 import React, { useState } from 'react';
+import theme from '../theme';
 
 export default function MenuScreen({ onStart }) {
   const [nick, setNick] = useState('');
 
   return (
     <div style={containerStyle}>
-      <h1 style={{ color: '#f5f5dc', fontSize: 36, marginBottom: 24 }}>Lumpzammon</h1>
+      <h1 style={{ color: theme.text, fontSize: 36, marginBottom: 4, letterSpacing: 2 }}>Lumpzammon</h1>
+      <div style={{ width: 120, height: 2, background: theme.gold, marginBottom: 24 }} />
       <input
         type="text"
         placeholder="Enter your nickname"
@@ -36,14 +38,14 @@ const containerStyle = {
   alignItems: 'center',
   justifyContent: 'center',
   minHeight: '100vh',
-  background: '#1a0f00',
+  background: theme.bg,
 };
 
 const inputStyle = {
-  background: '#2c1810',
-  border: '2px solid #8b4513',
+  background: theme.bgPanel,
+  border: `2px solid ${theme.border}`,
   borderRadius: 8,
-  color: '#f5f5dc',
+  color: theme.text,
   padding: '12px 16px',
   fontSize: 16,
   width: 260,
@@ -53,8 +55,8 @@ const inputStyle = {
 };
 
 const btnStyle = {
-  background: '#8b4513',
-  color: '#f5f5dc',
+  background: theme.btnBg,
+  color: theme.btnText,
   border: 'none',
   borderRadius: 8,
   padding: '12px 32px',

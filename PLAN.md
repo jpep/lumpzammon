@@ -28,6 +28,7 @@ The board and screens are functional but visually basic. This phase brings them 
 ### Tasks
 
 - [x] **Responsive layout** - Board scales down on narrow viewports, status bar is fluid
+- [x] **Casino theme** - Old-style casino look: black/white, red buttons, gold accents, centralized in `theme.js`
 - [ ] **Board aesthetics** - Wood textures, shadows, rounded triangles, point numbering
 - [ ] **Checker animations** - Smooth CSS transitions for moves, bar hits, bearing off
 - [ ] **Dice roll animation** - Tumble/spin before revealing values

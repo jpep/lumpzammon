@@ -1,10 +1,11 @@
 import React from 'react';
+import theme from '../theme';
 
 export default function ModeSelectScreen({ nick, onSelectMode, onBack }) {
   return (
     <div style={containerStyle}>
-      <h2 style={{ color: '#f5f5dc', marginBottom: 8 }}>Welcome, {nick}</h2>
-      <p style={{ color: '#d4a574', marginBottom: 32 }}>Choose game mode</p>
+      <h2 style={{ color: theme.text, marginBottom: 8 }}>Welcome, {nick}</h2>
+      <p style={{ color: theme.textSecondary, marginBottom: 32 }}>Choose game mode</p>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         <button onClick={() => onSelectMode('local')} style={btnStyle}>
@@ -31,12 +32,12 @@ const containerStyle = {
   alignItems: 'center',
   justifyContent: 'center',
   minHeight: '100vh',
-  background: '#1a0f00',
+  background: theme.bg,
 };
 
 const btnStyle = {
-  background: '#8b4513',
-  color: '#f5f5dc',
+  background: theme.btnBg,
+  color: theme.btnText,
   border: 'none',
   borderRadius: 8,
   padding: '14px 48px',
@@ -48,8 +49,8 @@ const btnStyle = {
 
 const btnSmall = {
   background: 'transparent',
-  color: '#d4a574',
-  border: '1px solid #8b4513',
+  color: theme.btnOutlineText,
+  border: `1px solid ${theme.btnOutlineBorder}`,
   borderRadius: 8,
   padding: '8px 24px',
   fontSize: 14,

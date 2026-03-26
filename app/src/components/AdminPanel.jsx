@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { sList, sGet, sDel } from '../storage';
+import theme from '../theme';
 
 export default function AdminPanel({ onClose }) {
   const [matches, setMatches] = useState([]);
@@ -50,9 +51,9 @@ export default function AdminPanel({ onClose }) {
 
   const renderSection = (title, items, type) => (
     <div style={{ marginBottom: 16 }}>
-      <h4 style={{ margin: '0 0 8px', color: '#d4a574' }}>{title} ({items.length})</h4>
+      <h4 style={{ margin: '0 0 8px', color: theme.gold }}>{title} ({items.length})</h4>
       {items.length === 0 ? (
-        <p style={{ fontSize: 13, color: '#886644' }}>None</p>
+        <p style={{ fontSize: 13, color: theme.textMuted }}>None</p>
       ) : (
         <>
           <ul style={{ listStyle: 'none', padding: 0, margin: '0 0 8px' }}>
@@ -63,7 +64,7 @@ export default function AdminPanel({ onClose }) {
               </li>
             ))}
           </ul>
-          <button onClick={() => handleClearAll(type)} style={{ ...btnStyle, background: '#8b0000' }}>
+          <button onClick={() => handleClearAll(type)} style={{ ...btnStyle, background: theme.btnBgDanger }}>
             Clear All
           </button>
         </>
@@ -75,20 +76,20 @@ export default function AdminPanel({ onClose }) {
     <div style={{
       position: 'fixed',
       inset: 0,
-      background: 'rgba(0,0,0,0.7)',
+      background: 'rgba(0,0,0,0.8)',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
       zIndex: 100,
     }}>
       <div style={{
-        background: '#2c1810',
-        border: '2px solid #8b4513',
+        background: theme.bgPanel,
+        border: `2px solid ${theme.border}`,
         borderRadius: 12,
         padding: 24,
         minWidth: 300,
         maxWidth: 500,
-        color: '#f5f5dc',
+        color: theme.text,
       }}>
         <h3 style={{ margin: '0 0 16px' }}>Admin Panel</h3>
         {loading ? (
@@ -108,8 +109,8 @@ export default function AdminPanel({ onClose }) {
 }
 
 const btnStyle = {
-  background: '#8b4513',
-  color: '#f5f5dc',
+  background: '#8b0000',
+  color: '#fff',
   border: 'none',
   borderRadius: 6,
   padding: '6px 12px',

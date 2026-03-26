@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { sList, sGet } from '../storage';
+import theme from '../theme';
 
 export default function LobbyScreen({ nick, onCreateMatch, onJoinMatch, onBack }) {
   const [lobbies, setLobbies] = useState([]);
@@ -25,18 +26,18 @@ export default function LobbyScreen({ nick, onCreateMatch, onJoinMatch, onBack }
 
   return (
     <div style={containerStyle}>
-      <h2 style={{ color: '#f5f5dc', marginBottom: 24 }}>Online Lobby</h2>
+      <h2 style={{ color: theme.text, marginBottom: 24 }}>Online Lobby</h2>
 
       <button onClick={onCreateMatch} style={btnStyle}>
         Create Match
       </button>
 
       <div style={{ marginTop: 24, width: 320 }}>
-        <h3 style={{ color: '#d4a574', marginBottom: 12 }}>
+        <h3 style={{ color: theme.textSecondary, marginBottom: 12 }}>
           Open Matches {loading ? '...' : `(${lobbies.length})`}
         </h3>
         {lobbies.length === 0 && !loading && (
-          <p style={{ color: '#886644', fontSize: 14 }}>No open matches. Create one!</p>
+          <p style={{ color: theme.textMuted, fontSize: 14 }}>No open matches. Create one!</p>
         )}
         {lobbies.map(lobby => (
           <div
@@ -45,24 +46,24 @@ export default function LobbyScreen({ nick, onCreateMatch, onJoinMatch, onBack }
               display: 'flex',
               justifyContent: 'space-between',
               alignItems: 'center',
-              background: '#2c1810',
-              border: '1px solid #8b4513',
+              background: theme.bgPanel,
+              border: `1px solid ${theme.border}`,
               borderRadius: 8,
               padding: '10px 14px',
               marginBottom: 8,
             }}
           >
-            <span style={{ color: '#f5f5dc' }}>{lobby.host}'s game</span>
+            <span style={{ color: theme.text }}>{lobby.host}'s game</span>
             {lobby.host !== nick && (
               <button
                 onClick={() => onJoinMatch(lobby.id)}
-                style={{ ...btnSmall, background: '#5c8a2f' }}
+                style={{ ...btnSmall, background: theme.btnBg }}
               >
                 Join
               </button>
             )}
             {lobby.host === nick && (
-              <span style={{ color: '#d4a574', fontSize: 13 }}>Waiting...</span>
+              <span style={{ color: theme.textSecondary, fontSize: 13 }}>Waiting...</span>
             )}
           </div>
         ))}
@@ -81,12 +82,12 @@ const containerStyle = {
   alignItems: 'center',
   justifyContent: 'center',
   minHeight: '100vh',
-  background: '#1a0f00',
+  background: theme.bg,
 };
 
 const btnStyle = {
-  background: '#8b4513',
-  color: '#f5f5dc',
+  background: theme.btnBg,
+  color: theme.btnText,
   border: 'none',
   borderRadius: 8,
   padding: '12px 32px',
@@ -97,8 +98,8 @@ const btnStyle = {
 
 const btnSmall = {
   background: 'transparent',
-  color: '#d4a574',
-  border: '1px solid #8b4513',
+  color: theme.btnOutlineText,
+  border: `1px solid ${theme.btnOutlineBorder}`,
   borderRadius: 8,
   padding: '6px 16px',
   fontSize: 13,

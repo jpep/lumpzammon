@@ -1,5 +1,6 @@
 import React from 'react';
 import Checker from './Checker';
+import theme from '../theme';
 
 export default function Point({
   index,
@@ -29,6 +30,7 @@ export default function Point({
   }
 
   const overflow = n > 5 ? n - 5 : 0;
+  const triColor = index % 2 === 0 ? theme.triangleDark : theme.triangleLight;
 
   return (
     <div
@@ -45,7 +47,6 @@ export default function Point({
         position: 'relative',
       }}
     >
-      {/* Triangle */}
       <div
         style={{
           position: 'absolute',
@@ -56,8 +57,8 @@ export default function Point({
           borderLeft: '21px solid transparent',
           borderRight: '21px solid transparent',
           [isTop ? 'borderTop' : 'borderBottom']:
-            `190px solid ${index % 2 === 0 ? '#8b4513' : '#d4a574'}`,
-          opacity: isHighlighted ? 0.8 : 0.6,
+            `190px solid ${triColor}`,
+          opacity: isHighlighted ? 0.9 : 0.7,
           zIndex: 0,
         }}
       />
@@ -65,7 +66,7 @@ export default function Point({
         {checkers}
         {overflow > 0 && (
           <div style={{
-            color: '#fff',
+            color: theme.text,
             fontSize: 11,
             fontWeight: 'bold',
             textShadow: '0 1px 2px #000',

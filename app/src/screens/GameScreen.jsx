@@ -1,13 +1,14 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Board from '../components/Board';
 import DiceFace from '../components/DiceFace';
+import theme from '../theme';
 import {
   newGameState, rollDice, getValidMoves, applyMove, checkWin, clone, P1, P2
 } from '../game/logic';
 import { aiPlay } from '../game/ai';
 
 function Stone({ player, size = 16 }) {
-  const colors = { 1: ['#f5f5dc', '#8b7355'], 2: ['#2c1810', '#5c3a21'] };
+  const colors = { 1: theme.checkerWhite, 2: theme.checkerBlack };
   const [fill, border] = colors[player];
   return (
     <span style={{
@@ -26,18 +27,18 @@ function Stone({ player, size = 16 }) {
 function PlayerTag({ name, player, isYou, isTurn, action, winner, align }) {
   const isRight = align === 'right';
   const actionStyle = {
-    color: '#ffcc00',
+    color: theme.textHighlight,
     fontSize: 12,
     fontWeight: 'bold',
     fontStyle: 'italic',
   };
   const nameStyle = {
-    color: isTurn ? '#ffcc00' : '#f5f5dc',
+    color: isTurn ? theme.textHighlight : theme.text,
     fontWeight: isTurn ? 'bold' : 'normal',
     fontSize: 15,
   };
   const youTag = isYou && (
-    <span style={{ color: '#5c8a2f', fontSize: 12, fontWeight: 'bold' }}>(you!)</span>
+    <span style={{ color: theme.textYou, fontSize: 12, fontWeight: 'bold' }}>(you!)</span>
   );
   const sep = action && <span style={actionStyle}>—</span>;
   const act = action && <span style={actionStyle}>{action}</span>;
@@ -258,7 +259,7 @@ export default function GameScreen({
           winner={gs.winner === P2}
         />
         {gs.winner && (
-          <span style={{ color: '#ffcc00', fontWeight: 'bold', fontSize: 16 }}>
+          <span style={{ color: theme.textHighlight, fontWeight: 'bold', fontSize: 16 }}>
             {playerName(gs.winner)} wins!
           </span>
         )}
@@ -274,7 +275,7 @@ export default function GameScreen({
       </div>
 
       {message && (
-        <div style={{ color: '#ffcc00', fontSize: 14, marginBottom: 8 }}>{message}</div>
+        <div style={{ color: theme.textHighlight, fontSize: 14, marginBottom: 8 }}>{message}</div>
       )}
 
       {/* Board — scales to fit viewport */}
@@ -338,7 +339,7 @@ const containerStyle = {
   alignItems: 'center',
   justifyContent: 'center',
   minHeight: '100vh',
-  background: '#1a0f00',
+  background: theme.bg,
   padding: 16,
 };
 
@@ -348,14 +349,14 @@ const statusStyle = {
   alignItems: 'center',
   width: '100%',
   maxWidth: 620,
-  color: '#f5f5dc',
+  color: theme.text,
   marginBottom: 12,
   fontSize: 14,
 };
 
 const btnStyle = {
-  background: '#8b4513',
-  color: '#f5f5dc',
+  background: theme.btnBg,
+  color: theme.btnText,
   border: 'none',
   borderRadius: 8,
   padding: '10px 24px',
@@ -366,8 +367,8 @@ const btnStyle = {
 
 const btnSmall = {
   background: 'transparent',
-  color: '#d4a574',
-  border: '1px solid #8b4513',
+  color: theme.btnOutlineText,
+  border: `1px solid ${theme.btnOutlineBorder}`,
   borderRadius: 8,
   padding: '8px 24px',
   fontSize: 14,
