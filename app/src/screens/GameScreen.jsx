@@ -24,35 +24,47 @@ function Stone({ player, size = 16 }) {
 }
 
 function PlayerTag({ name, player, isYou, isTurn, action, winner, align }) {
+  const isRight = align === 'right';
+  const actionStyle = {
+    color: '#ffcc00',
+    fontSize: 12,
+    fontWeight: 'bold',
+    fontStyle: 'italic',
+  };
+  const nameStyle = {
+    color: isTurn ? '#ffcc00' : '#f5f5dc',
+    fontWeight: isTurn ? 'bold' : 'normal',
+    fontSize: 15,
+  };
+  const youTag = isYou && (
+    <span style={{ color: '#5c8a2f', fontSize: 12, fontWeight: 'bold' }}>(you!)</span>
+  );
+  const sep = action && <span style={actionStyle}>—</span>;
+  const act = action && <span style={actionStyle}>{action}</span>;
+
   return (
     <div style={{
       display: 'flex',
       alignItems: 'center',
       gap: 6,
-      flexDirection: align === 'right' ? 'row-reverse' : 'row',
       minWidth: 160,
+      justifyContent: isRight ? 'flex-end' : 'flex-start',
     }}>
-      <Stone player={player} />
-      <span style={{
-        color: isTurn ? '#ffcc00' : '#f5f5dc',
-        fontWeight: isTurn ? 'bold' : 'normal',
-        fontSize: 15,
-      }}>
-        {name}
-      </span>
-      {isYou && (
-        <span style={{ color: '#5c8a2f', fontSize: 12, fontWeight: 'bold' }}>(you!)</span>
+      {isRight && <>{act}{sep}</>}
+      {isRight ? (
+        <>
+          <span style={nameStyle}>{name}</span>
+          {youTag}
+          <Stone player={player} />
+        </>
+      ) : (
+        <>
+          <Stone player={player} />
+          <span style={nameStyle}>{name}</span>
+          {youTag}
+        </>
       )}
-      {action && (
-        <span style={{
-          color: '#ffcc00',
-          fontSize: 12,
-          fontWeight: 'bold',
-          fontStyle: 'italic',
-        }}>
-          — {action}
-        </span>
-      )}
+      {!isRight && <>{sep}{act}</>}
     </div>
   );
 }
