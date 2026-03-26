@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Board from '../components/Board';
 import DiceFace from '../components/DiceFace';
 import {
@@ -92,6 +92,18 @@ export default function GameScreen({
 
   const [selectedFrom, setSelectedFrom] = useState(null);
   const [message, setMessage] = useState('');
+  const [boardScale, setBoardScale] = useState(1);
+  const BOARD_WIDTH = 620;
+
+  useEffect(() => {
+    const calc = () => {
+      const vw = window.innerWidth - 32;
+      setBoardScale(vw < BOARD_WIDTH ? vw / BOARD_WIDTH : 1);
+    };
+    calc();
+    window.addEventListener('resize', calc);
+    return () => window.removeEventListener('resize', calc);
+  }, []);
 
   const currentPlayer = gs.turn || P1;
   const myTurn = isOnline ? (playerSlot === currentPlayer) : true;
@@ -259,17 +271,30 @@ export default function GameScreen({
         <div style={{ color: '#ffcc00', fontSize: 14, marginBottom: 8 }}>{message}</div>
       )}
 
-      {/* Board */}
-      <Board
-        gameState={gs}
-        validMoves={validMoves}
-        selectedFrom={selectedFrom}
-        onClickChecker={handleClickChecker}
-        onClickPoint={handleClickPoint}
-        onClickBar={handleClickBar}
-        onClickOff={handleClickOff}
-        currentPlayer={currentPlayer}
-      />
+      {/* Board — scales to fit viewport */}
+      <div style={{
+        width: '100%',
+        maxWidth: BOARD_WIDTH,
+        display: 'flex',
+        justifyContent: 'center',
+      }}>
+        <div style={{
+          transform: `scale(${boardScale})`,
+          transformOrigin: 'top center',
+          marginBottom: boardScale < 1 ? -(1 - boardScale) * 420 : 0,
+        }}>
+          <Board
+            gameState={gs}
+            validMoves={validMoves}
+            selectedFrom={selectedFrom}
+            onClickChecker={handleClickChecker}
+            onClickPoint={handleClickPoint}
+            onClickBar={handleClickBar}
+            onClickOff={handleClickOff}
+            currentPlayer={currentPlayer}
+          />
+        </div>
+      </div>
 
       {/* Dice + controls */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginTop: 16 }}>
@@ -315,7 +340,8 @@ const statusStyle = {
   display: 'flex',
   justifyContent: 'space-between',
   alignItems: 'center',
-  width: 600,
+  width: '100%',
+  maxWidth: 620,
   color: '#f5f5dc',
   marginBottom: 12,
   fontSize: 14,

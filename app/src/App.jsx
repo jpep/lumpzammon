@@ -102,10 +102,10 @@ export default function App() {
         onTouchMove={() => clearTimeout(adminLongPress.current)}
         style={{
           position: 'fixed',
-          bottom: 4,
-          right: 4,
-          width: 20,
-          height: 20,
+          bottom: 8,
+          right: 8,
+          width: 28,
+          height: 28,
           cursor: 'pointer',
           opacity: 0,
         }}
