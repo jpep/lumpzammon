@@ -149,7 +149,10 @@ Live URL: https://jpep.github.io/lumpzammon/
 ### Key configuration
 
 - **Vite base path**: Set in `vite.config.js` (`/lumpzammon/`). Change this if deploying under a different path.
-- **Firebase config**: Placeholder values in `src/storage/firebaseAdapter.js`. Must be replaced with real credentials for online mode.
+- **Firebase config**: Read from environment variables (`import.meta.env.VITE_FIREBASE_*`).
+  - **Local dev**: set values in `app/.env` (gitignored, see `app/.env.example` for template)
+  - **GitHub Pages**: injected via repository secrets during the Actions build step
+  - Firebase project: `lumpzammon` (Spark/free plan, Realtime Database)
 
 ## Origin
 

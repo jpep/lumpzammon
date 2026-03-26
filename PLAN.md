@@ -4,63 +4,20 @@ This document tracks the development roadmap. Each phase is designed to be worke
 
 ---
 
-## Phase 1: Firebase Configuration (online mode)
+## Phase 1: Firebase Configuration (online mode) -- DONE
 
-Online mode is wired up but needs a real Firebase project. The storage layer auto-detects the environment — once the config is set, online play will just work.
+Firebase project `lumpzammon` configured with Realtime Database in test mode.
 
-### Steps
+### What was done
 
-1. **Create Firebase project**
-   - Go to [console.firebase.google.com](https://console.firebase.google.com)
-   - Add project (e.g. `backgammon-online`), disable Analytics
-   - Enable **Realtime Database** (Build > Realtime Database > Create Database)
-   - Choose region, start in **test mode**
-
-2. **Register a web app**
-   - Project settings > Your apps > Web (`</>`)
-   - Register with any nickname
-   - Copy the `firebaseConfig` object
-
-3. **Paste config into the app**
-   - Open `app/src/storage/firebaseAdapter.js`
-   - Replace the placeholder block:
-     ```js
-     const firebaseConfig = {
-       apiKey: "YOUR_API_KEY",
-       authDomain: "YOUR_PROJECT.firebaseapp.com",
-       databaseURL: "https://YOUR_PROJECT-default-rtdb.firebaseio.com",
-       projectId: "YOUR_PROJECT",
-       storageBucket: "YOUR_PROJECT.appspot.com",
-       messagingSenderId: "000000000000",
-       appId: "YOUR_APP_ID"
-     };
-     ```
-
-4. **Set database rules** (for development)
-   - Realtime Database > Rules:
-     ```json
-     { "rules": { ".read": true, ".write": true } }
-     ```
-   - This is open access — fine for prototyping, must be locked down later (see Phase 5)
-
-5. **Test online mode**
-   - Open two browser tabs at `http://localhost:5173/backgammon-online/`
-   - Tab 1: enter nick, Online > Create Match
-   - Tab 2: enter nick, Online > join the match
-   - Verify moves sync between tabs
-
-### Environment variable approach (optional improvement)
-Instead of hardcoding the config, move it to a `.env` file:
-```env
-VITE_FIREBASE_API_KEY=...
-VITE_FIREBASE_AUTH_DOMAIN=...
-VITE_FIREBASE_DATABASE_URL=...
-VITE_FIREBASE_PROJECT_ID=...
-VITE_FIREBASE_STORAGE_BUCKET=...
-VITE_FIREBASE_MESSAGING_SENDER_ID=...
-VITE_FIREBASE_APP_ID=...
-```
-Then read via `import.meta.env.VITE_FIREBASE_*` in `firebaseAdapter.js`.
+- [x] **Create Firebase project** — `lumpzammon` on Spark (free) plan, Realtime Database in test mode
+- [x] **Register web app** — config obtained from Firebase console
+- [x] **Environment variables** — config read from `import.meta.env.VITE_FIREBASE_*` (not hardcoded)
+  - Local dev: `app/.env` (gitignored)
+  - GitHub Pages: injected via repository secrets at build time
+  - Template: `app/.env.example` committed for reference
+- [x] **Database rules** — open read/write (test mode), must be locked down later (see Phase 5)
+- [ ] **Test online mode** — verify two-tab match sync on https://jpep.github.io/lumpzammon/
 
 ---
 
