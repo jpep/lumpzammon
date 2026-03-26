@@ -87,7 +87,7 @@ The current AI is a single-step greedy evaluator. It works but is beatable.
   }
   ```
 - [ ] **Match timeout/cleanup** - Auto-delete stale matches older than 1 hour
-- [ ] **Reconnection** - Detect disconnect and allow rejoining an in-progress match
+- [x] **Reconnection** - Detect disconnect and allow rejoining an in-progress match (localStorage saves nick + matchId + playerSlot; on load, auto-reconnects to Firebase match if still alive)
 - [ ] **Spectator mode** - Read-only view for third-party observers
 - [ ] **Chat** - Simple in-game messaging between opponents
 - [ ] **Rate limiting** - Prevent spam/abuse of match creation

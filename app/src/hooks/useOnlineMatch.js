@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { sGet, sSet, sDel, sList, sSubscribe } from '../storage';
 import { newGameState, clone } from '../game/logic';
+import { saveSession, clearSession } from '../storage/local';
 
 export default function useOnlineMatch(nick) {
   const [matchId, setMatchId] = useState(null);
@@ -21,6 +22,7 @@ export default function useOnlineMatch(nick) {
     setMatchId(id);
     setPlayerSlot(1);
     setMatchData(data);
+    saveSession(id, 1);
     return id;
   }, [nick]);
 
@@ -33,6 +35,27 @@ export default function useOnlineMatch(nick) {
     setMatchId(id);
     setPlayerSlot(2);
     setMatchData(data);
+    saveSession(id, 2);
+    return true;
+  }, [nick]);
+
+  // Reconnect to an existing match without modifying DB data.
+  // Returns true if match still exists and player belongs to it.
+  const reconnectMatch = useCallback(async (id, slot) => {
+    const data = await sGet(`bg:match:${id}`);
+    if (!data) {
+      clearSession();
+      return false;
+    }
+    // Verify this player actually belongs to this match
+    if (data.players[slot] !== nick) {
+      clearSession();
+      return false;
+    }
+    setMatchId(id);
+    setPlayerSlot(slot);
+    setMatchData(data);
+    saveSession(id, slot);
     return true;
   }, [nick]);
 
@@ -63,6 +86,7 @@ export default function useOnlineMatch(nick) {
     setMatchId(null);
     setMatchData(null);
     setPlayerSlot(null);
+    clearSession();
   }, [matchId]);
 
   return {
@@ -71,6 +95,7 @@ export default function useOnlineMatch(nick) {
     playerSlot,
     createMatch,
     joinMatch,
+    reconnectMatch,
     updateMatch,
     leaveMatch,
   };
