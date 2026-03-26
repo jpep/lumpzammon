@@ -11,11 +11,14 @@ export default function Point({
   onClickPoint,
   onClickChecker,
   selectedFrom,
+  animatingFrom,
 }) {
   const theme = useTheme();
   const { n, p } = point;
   const checkers = [];
   const maxShow = Math.min(n, 5);
+
+  const isAnimatingAway = animatingFrom === index;
 
   for (let i = 0; i < maxShow; i++) {
     const isTopChecker = i === maxShow - 1;
@@ -25,7 +28,11 @@ export default function Point({
         player={p}
         selected={isSelected && isTopChecker}
         onClick={isTopChecker && onClickChecker ? () => onClickChecker(index) : undefined}
-        style={{ marginBottom: isTop ? 2 : 0, marginTop: isTop ? 0 : 2 }}
+        style={{
+          marginBottom: isTop ? 2 : 0,
+          marginTop: isTop ? 0 : 2,
+          opacity: isTopChecker && isAnimatingAway ? 0 : 1,
+        }}
       />
     );
   }
@@ -35,6 +42,7 @@ export default function Point({
 
   return (
     <div
+      data-point-id={index}
       onClick={() => onClickPoint && onClickPoint(index)}
       style={{
         display: 'flex',

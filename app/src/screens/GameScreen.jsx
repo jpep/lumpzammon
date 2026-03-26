@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Board from '../components/Board';
+import Checker from '../components/Checker';
 import DiceFace from '../components/DiceFace';
 import { useTheme } from '../ThemeContext';
 import {
@@ -72,6 +73,8 @@ function PlayerTag({ name, player, isYou, isTurn, action, winner, align }) {
   );
 }
 
+const ANIMATION_DURATION = 300;
+
 export default function GameScreen({
   mode,
   nick,
@@ -103,6 +106,12 @@ export default function GameScreen({
   };
   const [boardScale, setBoardScale] = useState(calcScale);
 
+  // Animation state
+  const [flyingChecker, setFlyingChecker] = useState(null);
+  const [animatingFrom, setAnimatingFrom] = useState(null);
+  const [animatingPlayer, setAnimatingPlayer] = useState(null);
+  const isAnimatingRef = useRef(false);
+
   useEffect(() => {
     const update = () => setBoardScale(calcScale());
     window.addEventListener('resize', update);
@@ -126,6 +135,56 @@ export default function GameScreen({
       setLocalState(newState);
     }
   }, [isOnline, onUpdateMatch]);
+
+  const getElementCenter = (selector) => {
+    const el = document.querySelector(selector);
+    if (!el) return null;
+    const rect = el.getBoundingClientRect();
+    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+  };
+
+  const animateAndExecute = useCallback((move, player, callback) => {
+    // Calculate source position
+    let fromPos;
+    if (move.f === 'bar') {
+      fromPos = getElementCenter(`[data-bar-player="${player}"]`);
+    } else {
+      fromPos = getElementCenter(`[data-point-id="${move.f}"]`);
+    }
+
+    // Calculate destination position
+    let toPos;
+    if (move.t === 'off') {
+      toPos = getElementCenter(`[data-point-id="off-${player}"]`);
+    } else {
+      toPos = getElementCenter(`[data-point-id="${move.t}"]`);
+    }
+
+    if (!fromPos || !toPos) {
+      callback();
+      return;
+    }
+
+    // Hide source checker and show flying checker
+    setAnimatingFrom(move.f);
+    setAnimatingPlayer(player);
+    setFlyingChecker({ from: fromPos, to: toPos, player, arrived: false });
+
+    // Trigger transition in next frames
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        setFlyingChecker(prev => prev ? { ...prev, arrived: true } : null);
+      });
+    });
+
+    // After animation completes, apply state
+    setTimeout(() => {
+      setFlyingChecker(null);
+      setAnimatingFrom(null);
+      setAnimatingPlayer(null);
+      callback();
+    }, ANIMATION_DURATION + 50);
+  }, []);
 
   const handleRoll = useCallback(() => {
     if (gs.phase !== 'roll') return;
@@ -151,13 +210,14 @@ export default function GameScreen({
     updateState(newGs);
   }, [gs, currentPlayer, myTurn, isOnline, updateState]);
 
-  // AI turn — apply one move at a time so each is visually distinct
+  // AI turn — apply one move at a time with animation
   useEffect(() => {
     if (!isAI || currentPlayer !== P2 || gs.phase !== 'move') return;
+    if (isAnimatingRef.current) return;
+
     const timer = setTimeout(() => {
       const { seq } = aiPlay(gs, P2);
       if (seq.length === 0) {
-        // No valid moves — end turn
         const newGs = clone(gs);
         newGs.phase = 'roll';
         newGs.turn = P1;
@@ -169,27 +229,30 @@ export default function GameScreen({
         return;
       }
 
-      // Apply only the first move; the effect re-triggers for subsequent moves
-      const newGs = applyMove(gs, P2, seq[0]);
+      isAnimatingRef.current = true;
+      animateAndExecute(seq[0], P2, () => {
+        const newGs = applyMove(gs, P2, seq[0]);
 
-      const remaining = getValidMoves(newGs, P2);
-      if (remaining.length === 0 || newGs.moves.length === 0) {
-        const w = checkWin(newGs);
-        if (w) {
-          newGs.winner = w;
-          newGs.phase = 'done';
-        } else {
-          newGs.phase = 'roll';
-          newGs.turn = P1;
-          newGs.dice = [];
-          newGs.moves = [];
+        const remaining = getValidMoves(newGs, P2);
+        if (remaining.length === 0 || newGs.moves.length === 0) {
+          const w = checkWin(newGs);
+          if (w) {
+            newGs.winner = w;
+            newGs.phase = 'done';
+          } else {
+            newGs.phase = 'roll';
+            newGs.turn = P1;
+            newGs.dice = [];
+            newGs.moves = [];
+          }
         }
-      }
 
-      updateState(newGs);
+        updateState(newGs);
+        isAnimatingRef.current = false;
+      });
     }, 750);
     return () => clearTimeout(timer);
-  }, [isAI, currentPlayer, gs, updateState]);
+  }, [isAI, currentPlayer, gs, updateState, animateAndExecute]);
 
   // AI auto-roll
   useEffect(() => {
@@ -199,6 +262,7 @@ export default function GameScreen({
   }, [isAI, currentPlayer, gs.phase, gs.winner, handleRoll]);
 
   const handleClickChecker = (from) => {
+    if (isAnimatingRef.current) return;
     if (!myTurn || gs.phase !== 'move') return;
     if (isAI && currentPlayer === P2) return;
 
@@ -234,26 +298,33 @@ export default function GameScreen({
   };
 
   const executeMove = (move) => {
-    const newGs = applyMove(gs, currentPlayer, move);
-    const w = checkWin(newGs);
-    if (w) {
-      newGs.winner = w;
-      newGs.phase = 'done';
+    if (isAnimatingRef.current) return;
+    isAnimatingRef.current = true;
+
+    animateAndExecute(move, currentPlayer, () => {
+      const newGs = applyMove(gs, currentPlayer, move);
+      const w = checkWin(newGs);
+      if (w) {
+        newGs.winner = w;
+        newGs.phase = 'done';
+        updateState(newGs);
+        setSelectedFrom(null);
+        isAnimatingRef.current = false;
+        return;
+      }
+
+      const remaining = getValidMoves(newGs, currentPlayer);
+      if (remaining.length === 0 || newGs.moves.length === 0) {
+        newGs.phase = 'roll';
+        newGs.turn = currentPlayer === P1 ? P2 : P1;
+        newGs.dice = [];
+        newGs.moves = [];
+      }
+
       updateState(newGs);
       setSelectedFrom(null);
-      return;
-    }
-
-    const remaining = getValidMoves(newGs, currentPlayer);
-    if (remaining.length === 0 || newGs.moves.length === 0) {
-      newGs.phase = 'roll';
-      newGs.turn = currentPlayer === P1 ? P2 : P1;
-      newGs.dice = [];
-      newGs.moves = [];
-    }
-
-    updateState(newGs);
-    setSelectedFrom(null);
+      isAnimatingRef.current = false;
+    });
   };
 
   const handleNewGame = () => {
@@ -364,9 +435,27 @@ export default function GameScreen({
             onClickBar={handleClickBar}
             onClickOff={handleClickOff}
             currentPlayer={currentPlayer}
+            animatingFrom={animatingFrom}
+            animatingPlayer={animatingPlayer}
           />
         </div>
       </div>
+
+      {/* Flying checker animation overlay */}
+      {flyingChecker && (
+        <div
+          style={{
+            position: 'fixed',
+            left: flyingChecker.arrived ? flyingChecker.to.x - 18 : flyingChecker.from.x - 18,
+            top: flyingChecker.arrived ? flyingChecker.to.y - 18 : flyingChecker.from.y - 18,
+            zIndex: 9999,
+            transition: `left ${ANIMATION_DURATION}ms ease-in-out, top ${ANIMATION_DURATION}ms ease-in-out`,
+            pointerEvents: 'none',
+          }}
+        >
+          <Checker player={flyingChecker.player} />
+        </div>
+      )}
 
       {/* Dice + controls */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginTop: 16 }}>

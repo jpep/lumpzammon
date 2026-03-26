@@ -13,6 +13,8 @@ export default function Board({
   onClickBar,
   onClickOff,
   currentPlayer,
+  animatingFrom,
+  animatingPlayer,
 }) {
   const theme = useTheme();
   const { pts, bar, off } = gameState;
@@ -42,6 +44,7 @@ export default function Board({
             onClickPoint={highlightedTargets.has(idx) ? onClickPoint : undefined}
             onClickChecker={onClickChecker}
             selectedFrom={selectedFrom}
+            animatingFrom={animatingFrom}
           />
         );
       })}
@@ -66,11 +69,12 @@ export default function Board({
         <div style={{ display: 'flex' }}>
           {renderHalf(TOP_IDX.slice(0, 6), true)}
         </div>
-        <BarZone bar={bar} onClickBar={onClickBar} selectedFrom={selectedFrom} />
+        <BarZone bar={bar} onClickBar={onClickBar} selectedFrom={selectedFrom} animatingFrom={animatingFrom} animatingPlayer={animatingPlayer} />
         <div style={{ display: 'flex' }}>
           {renderHalf(TOP_IDX.slice(7), true)}
         </div>
         <div
+          data-point-id="off-2"
           onClick={offHighlight ? onClickOff : undefined}
           style={{
             width: 50,
@@ -97,11 +101,12 @@ export default function Board({
         <div style={{ display: 'flex' }}>
           {renderHalf(BOT_IDX.slice(0, 6), false)}
         </div>
-        <BarZone bar={bar} onClickBar={onClickBar} selectedFrom={selectedFrom} />
+        <BarZone bar={bar} onClickBar={onClickBar} selectedFrom={selectedFrom} animatingFrom={animatingFrom} animatingPlayer={animatingPlayer} />
         <div style={{ display: 'flex' }}>
           {renderHalf(BOT_IDX.slice(7), false)}
         </div>
         <div
+          data-point-id="off-1"
           onClick={offHighlight ? onClickOff : undefined}
           style={{
             width: 50,
