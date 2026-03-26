@@ -137,8 +137,8 @@ The current AI is a single-step greedy evaluator. It works but is beatable.
 
 ### Tasks
 
-- [ ] **GitHub repo setup** - Initialize git, push to GitHub
-- [ ] **GitHub Pages deploy** - The Actions workflow (`deploy.yml`) is already written, just needs a push to `main`
+- [x] **GitHub repo setup** - Initialize git, push to GitHub (`jpep/lumpzammon`)
+- [x] **GitHub Pages deploy** - Live at https://jpep.github.io/lumpzammon/
 - [ ] **Custom domain** - Optional: configure CNAME for a custom domain
 - [ ] **Firebase env separation** - Separate Firebase projects for dev vs prod
 - [ ] **CI checks** - Add lint + test steps to the GitHub Actions workflow
