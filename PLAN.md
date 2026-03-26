@@ -61,6 +61,7 @@ The current AI is a single-step greedy evaluator. It works but is beatable.
 
 ### Tasks
 
+- [x] **Smooth AI playback** - AI moves are applied one stone at a time with delays (750ms between moves, 800ms before auto-roll) so each action is visually clear
 - [ ] **Difficulty levels** - Easy (random), Medium (current greedy), Hard (deeper eval)
 - [ ] **1-ply lookahead** - For hard mode, evaluate opponent's best response before choosing
 - [ ] **Opening book** - Hardcode known best opening moves

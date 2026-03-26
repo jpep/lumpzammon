@@ -151,30 +151,50 @@ export default function GameScreen({
     updateState(newGs);
   }, [gs, currentPlayer, myTurn, isOnline, updateState]);
 
-  // AI turn
+  // AI turn — apply one move at a time so each is visually distinct
   useEffect(() => {
     if (!isAI || currentPlayer !== P2 || gs.phase !== 'move') return;
     const timer = setTimeout(() => {
-      const { state: newState } = aiPlay(gs, P2);
-      const w = checkWin(newState);
-      if (w) {
-        newState.winner = w;
-        newState.phase = 'done';
-      } else {
-        newState.phase = 'roll';
-        newState.turn = P1;
-        newState.dice = [];
-        newState.moves = [];
+      const { seq } = aiPlay(gs, P2);
+      if (seq.length === 0) {
+        // No valid moves — end turn
+        const newGs = clone(gs);
+        newGs.phase = 'roll';
+        newGs.turn = P1;
+        newGs.dice = [];
+        newGs.moves = [];
+        setMessage('No valid moves! Turn passes.');
+        setTimeout(() => setMessage(''), 2000);
+        updateState(newGs);
+        return;
       }
-      updateState(newState);
-    }, 600);
+
+      // Apply only the first move; the effect re-triggers for subsequent moves
+      const newGs = applyMove(gs, P2, seq[0]);
+
+      const remaining = getValidMoves(newGs, P2);
+      if (remaining.length === 0 || newGs.moves.length === 0) {
+        const w = checkWin(newGs);
+        if (w) {
+          newGs.winner = w;
+          newGs.phase = 'done';
+        } else {
+          newGs.phase = 'roll';
+          newGs.turn = P1;
+          newGs.dice = [];
+          newGs.moves = [];
+        }
+      }
+
+      updateState(newGs);
+    }, 750);
     return () => clearTimeout(timer);
   }, [isAI, currentPlayer, gs, updateState]);
 
   // AI auto-roll
   useEffect(() => {
     if (!isAI || currentPlayer !== P2 || gs.phase !== 'roll' || gs.winner) return;
-    const timer = setTimeout(handleRoll, 500);
+    const timer = setTimeout(handleRoll, 800);
     return () => clearTimeout(timer);
   }, [isAI, currentPlayer, gs.phase, gs.winner, handleRoll]);
 
