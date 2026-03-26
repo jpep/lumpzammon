@@ -23,7 +23,14 @@ export default function GameScreen({
   };
 
   const [localState, setLocalState] = useState(() => newGameState());
-  const gs = isOnline ? (matchData?.state || localState) : localState;
+  const rawGs = isOnline ? (matchData?.state || localState) : localState;
+  const gs = {
+    ...rawGs,
+    dice: rawGs.dice || [],
+    moves: rawGs.moves || [],
+    bar: rawGs.bar || { 1: 0, 2: 0 },
+    off: rawGs.off || { 1: 0, 2: 0 },
+  };
 
   const [selectedFrom, setSelectedFrom] = useState(null);
   const [message, setMessage] = useState('');
