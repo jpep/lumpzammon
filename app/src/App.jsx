@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import MenuScreen from './screens/MenuScreen';
 import ModeSelectScreen from './screens/ModeSelectScreen';
 import LobbyScreen from './screens/LobbyScreen';
@@ -14,6 +14,7 @@ export default function App() {
   const [nick, setNick] = useState('');
   const [mode, setMode] = useState(null);
   const [showAdmin, setShowAdmin] = useState(false);
+  const adminLongPress = useRef(null);
 
   const { matchId, matchData, playerSlot, createMatch, joinMatch, updateMatch, leaveMatch } =
     useOnlineMatch(nick);
@@ -91,11 +92,14 @@ export default function App() {
 
       <BuildInfo />
 
-      {/* Admin toggle (Ctrl+Shift+A) */}
+      {/* Admin toggle: double-click or long-tap (mobile) */}
       {showAdmin && <AdminPanel onClose={() => setShowAdmin(false)} />}
 
       <div
         onDoubleClick={() => setShowAdmin(true)}
+        onTouchStart={() => { adminLongPress.current = setTimeout(() => setShowAdmin(true), 800); }}
+        onTouchEnd={() => clearTimeout(adminLongPress.current)}
+        onTouchMove={() => clearTimeout(adminLongPress.current)}
         style={{
           position: 'fixed',
           bottom: 4,
