@@ -120,7 +120,7 @@ All game rules live in `src/game/logic.js` as pure functions with no dependencie
 # Start dev server with hot reload on port 5173
 docker compose --profile dev up dev
 
-# Access at: http://localhost:5173/backgammon-online/
+# Access at: http://localhost:5173/lumpzammon/
 ```
 
 ### Production build (Docker)
@@ -132,9 +132,23 @@ docker compose up app --build
 # Access at: http://localhost:3000/
 ```
 
+### Deployment (GitHub Pages)
+
+The app auto-deploys to GitHub Pages on every push to `main` via `.github/workflows/deploy.yml`.
+
+```bash
+# Manual deploy (without pushing a commit)
+gh workflow run deploy.yml
+
+# Check deploy status
+gh run list --limit 1
+```
+
+Live URL: https://jpep.github.io/lumpzammon/
+
 ### Key configuration
 
-- **Vite base path**: Set in `vite.config.js` (`/backgammon-online/`). Change this if deploying under a different path.
+- **Vite base path**: Set in `vite.config.js` (`/lumpzammon/`). Change this if deploying under a different path.
 - **Firebase config**: Placeholder values in `src/storage/firebaseAdapter.js`. Must be replaced with real credentials for online mode.
 
 ## Origin
