@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { sList, sGet, sDel } from '../storage';
-import theme from '../theme';
+import { useTheme } from '../ThemeContext';
 
 export default function AdminPanel({ onClose }) {
   const [matches, setMatches] = useState([]);
   const [lobbies, setLobbies] = useState([]);
   const [loading, setLoading] = useState(true);
+  const theme = useTheme();
 
   useEffect(() => {
     (async () => {
@@ -47,6 +48,16 @@ export default function AdminPanel({ onClose }) {
     for (const item of items) await sDel(item.key);
     if (type === 'match') setMatches([]);
     else setLobbies([]);
+  };
+
+  const btnStyle = {
+    background: theme.btnBg,
+    color: theme.btnText,
+    border: 'none',
+    borderRadius: 6,
+    padding: '6px 12px',
+    cursor: 'pointer',
+    fontSize: 13,
   };
 
   const renderSection = (title, items, type) => (
@@ -107,13 +118,3 @@ export default function AdminPanel({ onClose }) {
     </div>
   );
 }
-
-const btnStyle = {
-  background: '#8b0000',
-  color: '#fff',
-  border: 'none',
-  borderRadius: 6,
-  padding: '6px 12px',
-  cursor: 'pointer',
-  fontSize: 13,
-};

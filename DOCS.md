@@ -39,6 +39,7 @@ lumpzammon/
     └── src/
         ├── main.jsx               # React entry point
         ├── App.jsx                # Screen router + state management
+        ├── ThemeContext.jsx       # React Context for dynamic theming
         ├── storage/               # Storage abstraction layer
         │   ├── index.js           # Auto-detects environment
         │   ├── artifactAdapter.js # Claude artifact sandbox adapter
@@ -115,7 +116,17 @@ All game rules live in `src/game/logic.js` as pure functions with no dependencie
 
 ### Theme
 
-All colors are centralized in `src/theme.js` — old-style casino aesthetic with black backgrounds, white text, dark red buttons, and gold accents. To change the look, edit theme.js.
+All colors are centralized in `src/theme.js`. The active theme is provided to components via React Context (`src/ThemeContext.jsx`), allowing dynamic theme switching at runtime.
+
+Three theme variants are available:
+
+| Theme   | Trigger           | Aesthetic                                  |
+|---------|-------------------|--------------------------------------------|
+| Default | Any other name    | Casino — black, white, red, gold           |
+| Sepia   | Nickname "jugo"   | Warm browns, tans, parchment tones         |
+| Marine  | Nickname "pepo"   | Deep blues, teals, ocean tones             |
+
+The theme is selected automatically based on the player's nickname (case-insensitive, exact match). The `getTheme(nick)` function in `theme.js` handles the mapping. All components consume the theme via the `useTheme()` hook from `ThemeContext.jsx`.
 
 ### Status Bar
 

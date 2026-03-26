@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { sList, sGet } from '../storage';
-import theme from '../theme';
+import { useTheme } from '../ThemeContext';
 
 export default function LobbyScreen({ nick, onCreateMatch, onJoinMatch, onBack }) {
   const [lobbies, setLobbies] = useState([]);
   const [loading, setLoading] = useState(true);
   const intervalRef = useRef(null);
+  const theme = useTheme();
 
   const refresh = async () => {
     const keys = await sList('bg:lobby:');
@@ -23,6 +24,36 @@ export default function LobbyScreen({ nick, onCreateMatch, onJoinMatch, onBack }
     intervalRef.current = setInterval(refresh, 3000);
     return () => clearInterval(intervalRef.current);
   }, []);
+
+  const containerStyle = {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: '100vh',
+    background: theme.bg,
+  };
+
+  const btnStyle = {
+    background: theme.btnBg,
+    color: theme.btnText,
+    border: 'none',
+    borderRadius: 8,
+    padding: '12px 32px',
+    fontSize: 16,
+    cursor: 'pointer',
+    fontWeight: 'bold',
+  };
+
+  const btnSmall = {
+    background: 'transparent',
+    color: theme.btnOutlineText,
+    border: `1px solid ${theme.btnOutlineBorder}`,
+    borderRadius: 8,
+    padding: '6px 16px',
+    fontSize: 13,
+    cursor: 'pointer',
+  };
 
   return (
     <div style={containerStyle}>
@@ -75,33 +106,3 @@ export default function LobbyScreen({ nick, onCreateMatch, onJoinMatch, onBack }
     </div>
   );
 }
-
-const containerStyle = {
-  display: 'flex',
-  flexDirection: 'column',
-  alignItems: 'center',
-  justifyContent: 'center',
-  minHeight: '100vh',
-  background: theme.bg,
-};
-
-const btnStyle = {
-  background: theme.btnBg,
-  color: theme.btnText,
-  border: 'none',
-  borderRadius: 8,
-  padding: '12px 32px',
-  fontSize: 16,
-  cursor: 'pointer',
-  fontWeight: 'bold',
-};
-
-const btnSmall = {
-  background: 'transparent',
-  color: theme.btnOutlineText,
-  border: `1px solid ${theme.btnOutlineBorder}`,
-  borderRadius: 8,
-  padding: '6px 16px',
-  fontSize: 13,
-  cursor: 'pointer',
-};

@@ -1,5 +1,5 @@
 import React from 'react';
-import theme from '../theme';
+import { useTheme } from '../ThemeContext';
 
 const DOT_POSITIONS = {
   1: [[1,1]],
@@ -11,6 +11,7 @@ const DOT_POSITIONS = {
 };
 
 export default function DiceFace({ value, used, onClick }) {
+  const theme = useTheme();
   const dots = DOT_POSITIONS[value] || [];
   return (
     <div

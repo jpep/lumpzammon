@@ -1,6 +1,6 @@
 import React from 'react';
 import Checker from './Checker';
-import theme from '../theme';
+import { useTheme } from '../ThemeContext';
 
 export default function Point({
   index,
@@ -12,6 +12,7 @@ export default function Point({
   onClickChecker,
   selectedFrom,
 }) {
+  const theme = useTheme();
   const { n, p } = point;
   const checkers = [];
   const maxShow = Math.min(n, 5);

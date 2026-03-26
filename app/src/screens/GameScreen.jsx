@@ -1,13 +1,14 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Board from '../components/Board';
 import DiceFace from '../components/DiceFace';
-import theme from '../theme';
+import { useTheme } from '../ThemeContext';
 import {
   newGameState, rollDice, getValidMoves, applyMove, checkWin, clone, P1, P2
 } from '../game/logic';
 import { aiPlay } from '../game/ai';
 
 function Stone({ player, size = 16 }) {
+  const theme = useTheme();
   const colors = { 1: theme.checkerWhite, 2: theme.checkerBlack };
   const [fill, border] = colors[player];
   return (
@@ -25,6 +26,7 @@ function Stone({ player, size = 16 }) {
 }
 
 function PlayerTag({ name, player, isYou, isTurn, action, winner, align }) {
+  const theme = useTheme();
   const isRight = align === 'right';
   const actionStyle = {
     color: theme.textHighlight,
@@ -78,6 +80,7 @@ export default function GameScreen({
   onUpdateMatch,
   onBack,
 }) {
+  const theme = useTheme();
   const isOnline = mode === 'online';
   const isAI = mode === 'ai';
 
@@ -246,6 +249,48 @@ export default function GameScreen({
     return p === P1 ? (nick || 'White') : 'Black';
   };
 
+  const containerStyle = {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: '100vh',
+    background: theme.bg,
+    padding: 16,
+  };
+
+  const statusStyle = {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    width: '100%',
+    maxWidth: 620,
+    color: theme.text,
+    marginBottom: 12,
+    fontSize: 14,
+  };
+
+  const btnStyle = {
+    background: theme.btnBg,
+    color: theme.btnText,
+    border: 'none',
+    borderRadius: 8,
+    padding: '10px 24px',
+    fontSize: 16,
+    cursor: 'pointer',
+    fontWeight: 'bold',
+  };
+
+  const btnSmall = {
+    background: 'transparent',
+    color: theme.btnOutlineText,
+    border: `1px solid ${theme.btnOutlineBorder}`,
+    borderRadius: 8,
+    padding: '8px 24px',
+    fontSize: 14,
+    cursor: 'pointer',
+  };
+
   return (
     <div style={containerStyle}>
       {/* Status bar */}
@@ -332,45 +377,3 @@ export default function GameScreen({
     </div>
   );
 }
-
-const containerStyle = {
-  display: 'flex',
-  flexDirection: 'column',
-  alignItems: 'center',
-  justifyContent: 'center',
-  minHeight: '100vh',
-  background: theme.bg,
-  padding: 16,
-};
-
-const statusStyle = {
-  display: 'flex',
-  justifyContent: 'space-between',
-  alignItems: 'center',
-  width: '100%',
-  maxWidth: 620,
-  color: theme.text,
-  marginBottom: 12,
-  fontSize: 14,
-};
-
-const btnStyle = {
-  background: theme.btnBg,
-  color: theme.btnText,
-  border: 'none',
-  borderRadius: 8,
-  padding: '10px 24px',
-  fontSize: 16,
-  cursor: 'pointer',
-  fontWeight: 'bold',
-};
-
-const btnSmall = {
-  background: 'transparent',
-  color: theme.btnOutlineText,
-  border: `1px solid ${theme.btnOutlineBorder}`,
-  borderRadius: 8,
-  padding: '8px 24px',
-  fontSize: 14,
-  cursor: 'pointer',
-};
