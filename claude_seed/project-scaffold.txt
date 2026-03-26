@@ -1,0 +1,169 @@
+# Backgammon Online — Project Scaffold
+
+## Quick Start with Claude Code
+
+Paste this prompt into Claude Code (Code tab):
+
+```
+Create a Vite + React project called "backgammon-online" with the file structure 
+and code I'll provide. Initialize git, create a GitHub repo, and push it.
+Set up GitHub Pages deployment with a GitHub Actions workflow.
+```
+
+Then provide the files below.
+
+---
+
+## Project Structure
+
+```
+backgammon-online/
+├── index.html
+├── vite.config.js
+├── package.json
+├── .github/
+│   └── workflows/
+│       └── deploy.yml
+├── src/
+│   ├── main.jsx
+│   ├── App.jsx
+│   ├── storage/
+│   │   ├── index.js          ← auto-selects adapter
+│   │   ├── artifactAdapter.js ← window.storage (Claude artifacts)
+│   │   └── firebaseAdapter.js ← Firebase Realtime DB
+│   ├── game/
+│   │   ├── logic.js           ← pure game functions
+│   │   └── ai.js              ← AI evaluation + play
+│   ├── components/
+│   │   ├── Board.jsx
+│   │   ├── Point.jsx
+│   │   ├── Checker.jsx
+│   │   ├── DiceFace.jsx
+│   │   ├── BarZone.jsx
+│   │   └── AdminPanel.jsx
+│   ├── screens/
+│   │   ├── MenuScreen.jsx
+│   │   ├── ModeSelectScreen.jsx
+│   │   ├── LobbyScreen.jsx
+│   │   ├── GameScreen.jsx
+│   │   └── KickedScreen.jsx
+│   └── hooks/
+│       ├── useOnlineMatch.js
+│       └── useKickDetection.js
+└── firebase-setup.md
+```
+
+---
+
+## FILE: vite.config.js
+
+```js
+import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
+
+export default defineConfig({
+  plugins: [react()],
+  // Change 'backgammon-online' to your actual repo name
+  base: '/backgammon-online/',
+});
+```
+
+## FILE: package.json
+
+```json
+{
+  "name": "backgammon-online",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "firebase": "^11.0.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "vite": "^6.0.0"
+  }
+}
+```
+
+## FILE: .github/workflows/deploy.yml
+
+```yaml
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - uses: actions/configure-pages@v4
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+      - id: deployment
+        uses: actions/deploy-pages@v4
+```
+
+## FILE: index.html
+
+```html
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Backgammon Online</title>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      body { background: #1a0f00; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
+```
+
+## FILE: src/main.jsx
+
+```jsx
+import React from 'react';
+import ReactDOM from 'react-dom/client';
+import App from './App';
+
+ReactDOM.createRoot(document.getElementById('root')).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>
+);
+```
