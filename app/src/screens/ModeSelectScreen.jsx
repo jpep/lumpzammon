@@ -1,7 +1,40 @@
 import React from 'react';
-import theme from '../theme';
+import { useTheme } from '../ThemeContext';
 
 export default function ModeSelectScreen({ nick, onSelectMode, onBack }) {
+  const theme = useTheme();
+
+  const containerStyle = {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: '100vh',
+    background: theme.bg,
+  };
+
+  const btnStyle = {
+    background: theme.btnBg,
+    color: theme.btnText,
+    border: 'none',
+    borderRadius: 8,
+    padding: '14px 48px',
+    fontSize: 18,
+    cursor: 'pointer',
+    fontWeight: 'bold',
+    minWidth: 220,
+  };
+
+  const btnSmall = {
+    background: 'transparent',
+    color: theme.btnOutlineText,
+    border: `1px solid ${theme.btnOutlineBorder}`,
+    borderRadius: 8,
+    padding: '8px 24px',
+    fontSize: 14,
+    cursor: 'pointer',
+  };
+
   return (
     <div style={containerStyle}>
       <h2 style={{ color: theme.text, marginBottom: 8 }}>Welcome, {nick}</h2>
@@ -25,34 +58,3 @@ export default function ModeSelectScreen({ nick, onSelectMode, onBack }) {
     </div>
   );
 }
-
-const containerStyle = {
-  display: 'flex',
-  flexDirection: 'column',
-  alignItems: 'center',
-  justifyContent: 'center',
-  minHeight: '100vh',
-  background: theme.bg,
-};
-
-const btnStyle = {
-  background: theme.btnBg,
-  color: theme.btnText,
-  border: 'none',
-  borderRadius: 8,
-  padding: '14px 48px',
-  fontSize: 18,
-  cursor: 'pointer',
-  fontWeight: 'bold',
-  minWidth: 220,
-};
-
-const btnSmall = {
-  background: 'transparent',
-  color: theme.btnOutlineText,
-  border: `1px solid ${theme.btnOutlineBorder}`,
-  borderRadius: 8,
-  padding: '8px 24px',
-  fontSize: 14,
-  cursor: 'pointer',
-};

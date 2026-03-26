@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import theme from '../theme';
+import { useTheme } from '../ThemeContext';
 
 export default function BuildInfo() {
   const [open, setOpen] = useState(false);
+  const theme = useTheme();
 
   return (
     <>

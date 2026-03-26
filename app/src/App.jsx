@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useMemo, useCallback } from 'react';
 import MenuScreen from './screens/MenuScreen';
 import ModeSelectScreen from './screens/ModeSelectScreen';
 import LobbyScreen from './screens/LobbyScreen';
@@ -8,6 +8,8 @@ import AdminPanel from './components/AdminPanel';
 import BuildInfo from './components/BuildInfo';
 import useOnlineMatch from './hooks/useOnlineMatch';
 import useKickDetection from './hooks/useKickDetection';
+import { getTheme } from './theme';
+import { ThemeProvider } from './ThemeContext';
 
 export default function App() {
   const [screen, setScreen] = useState('menu');
@@ -57,12 +59,18 @@ export default function App() {
     setScreen('menu');
   };
 
+  const theme = useMemo(() => getTheme(nick), [nick]);
+
   if (kicked && screen === 'game') {
-    return <KickedScreen onBack={handleBackToMenu} />;
+    return (
+      <ThemeProvider theme={theme}>
+        <KickedScreen onBack={handleBackToMenu} />
+      </ThemeProvider>
+    );
   }
 
   return (
-    <>
+    <ThemeProvider theme={theme}>
       {screen === 'menu' && <MenuScreen onStart={handleStart} />}
       {screen === 'modeSelect' && (
         <ModeSelectScreen
@@ -110,6 +118,6 @@ export default function App() {
           opacity: 0,
         }}
       />
-    </>
+    </ThemeProvider>
   );
 }

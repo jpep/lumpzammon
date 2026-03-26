@@ -1,13 +1,13 @@
 import React from 'react';
-import theme from '../theme';
-
-const COLORS = {
-  1: { fill: theme.checkerWhite[0], border: theme.checkerWhite[1] },
-  2: { fill: theme.checkerBlack[0], border: theme.checkerBlack[1] },
-};
+import { useTheme } from '../ThemeContext';
 
 export default function Checker({ player, selected, onClick, style }) {
-  const { fill, border } = COLORS[player];
+  const theme = useTheme();
+  const colors = {
+    1: { fill: theme.checkerWhite[0], border: theme.checkerWhite[1] },
+    2: { fill: theme.checkerBlack[0], border: theme.checkerBlack[1] },
+  };
+  const { fill, border } = colors[player];
   return (
     <div
       onClick={onClick}

@@ -1,8 +1,42 @@
 import React, { useState } from 'react';
-import theme from '../theme';
+import { useTheme } from '../ThemeContext';
 
 export default function MenuScreen({ onStart }) {
   const [nick, setNick] = useState('');
+  const theme = useTheme();
+
+  const containerStyle = {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: '100vh',
+    background: theme.bg,
+  };
+
+  const inputStyle = {
+    background: theme.bgPanel,
+    border: `2px solid ${theme.border}`,
+    borderRadius: 8,
+    color: theme.text,
+    padding: '12px 16px',
+    fontSize: 16,
+    width: 260,
+    marginBottom: 16,
+    outline: 'none',
+    textAlign: 'center',
+  };
+
+  const btnStyle = {
+    background: theme.btnBg,
+    color: theme.btnText,
+    border: 'none',
+    borderRadius: 8,
+    padding: '12px 32px',
+    fontSize: 18,
+    cursor: 'pointer',
+    fontWeight: 'bold',
+  };
 
   return (
     <div style={containerStyle}>
@@ -31,36 +65,3 @@ export default function MenuScreen({ onStart }) {
     </div>
   );
 }
-
-const containerStyle = {
-  display: 'flex',
-  flexDirection: 'column',
-  alignItems: 'center',
-  justifyContent: 'center',
-  minHeight: '100vh',
-  background: theme.bg,
-};
-
-const inputStyle = {
-  background: theme.bgPanel,
-  border: `2px solid ${theme.border}`,
-  borderRadius: 8,
-  color: theme.text,
-  padding: '12px 16px',
-  fontSize: 16,
-  width: 260,
-  marginBottom: 16,
-  outline: 'none',
-  textAlign: 'center',
-};
-
-const btnStyle = {
-  background: theme.btnBg,
-  color: theme.btnText,
-  border: 'none',
-  borderRadius: 8,
-  padding: '12px 32px',
-  fontSize: 18,
-  cursor: 'pointer',
-  fontWeight: 'bold',
-};

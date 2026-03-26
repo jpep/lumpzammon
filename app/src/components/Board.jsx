@@ -2,7 +2,7 @@ import React from 'react';
 import Point from './Point';
 import BarZone from './BarZone';
 import { TOP_IDX, BOT_IDX } from '../game/logic';
-import theme from '../theme';
+import { useTheme } from '../ThemeContext';
 
 export default function Board({
   gameState,
@@ -14,6 +14,7 @@ export default function Board({
   onClickOff,
   currentPlayer,
 }) {
+  const theme = useTheme();
   const { pts, bar, off } = gameState;
 
   const highlightedTargets = new Set();

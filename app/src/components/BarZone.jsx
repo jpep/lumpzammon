@@ -1,8 +1,10 @@
 import React from 'react';
 import Checker from './Checker';
-import theme from '../theme';
+import { useTheme } from '../ThemeContext';
 
 export default function BarZone({ bar, onClickBar, selectedFrom }) {
+  const theme = useTheme();
+
   return (
     <div style={{
       display: 'flex',
