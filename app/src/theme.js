@@ -3,7 +3,7 @@ const theme = {
   // Backgrounds
   bg: '#0a0a0a',           // page background — near black
   bgPanel: '#1a1a1a',      // panels, modals, inputs
-  bgBoard: '#0d3d0d',      // board felt — deep casino green
+  bgBoard: '#346934',      // board felt — deep casino green
   bgBar: '#111',            // bar zone
   bgBearoff: '#111',        // bear-off zone
   bgBearoffActive: '#2a0a0a', // bear-off when highlighted
@@ -37,8 +37,8 @@ const theme = {
   checkerBlack: ['#1a1a1a', '#444'],
 
   // Board triangles
-  triangleDark: '#8b0000',  // dark red
-  triangleLight: '#d4af37', // gold
+  triangleDark: '#873232',  // dark red
+  triangleLight: '#dec46e', // gold
 
   // Dice
   diceBg: '#ffffff',
