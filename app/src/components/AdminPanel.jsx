@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { sList, sDel } from '../storage';
+import { sList, sGet, sDel } from '../storage';
 
 export default function AdminPanel({ onClose }) {
   const [matches, setMatches] = useState([]);
@@ -12,8 +12,22 @@ export default function AdminPanel({ onClose }) {
         sList('bg:match:'),
         sList('bg:lobby:'),
       ]);
-      setMatches(matchKeys);
-      setLobbies(lobbyKeys);
+      const matchData = await Promise.all(
+        matchKeys.map(async (key) => {
+          const data = await sGet(key);
+          const p1 = data?.players?.[1] || '?';
+          const p2 = data?.players?.[2] || 'waiting...';
+          return { key, label: `${p1} vs ${p2}` };
+        })
+      );
+      const lobbyData = await Promise.all(
+        lobbyKeys.map(async (key) => {
+          const data = await sGet(key);
+          return { key, label: data?.host || '?' };
+        })
+      );
+      setMatches(matchData);
+      setLobbies(lobbyData);
       setLoading(false);
     })();
   }, []);
@@ -21,31 +35,31 @@ export default function AdminPanel({ onClose }) {
   const handleClear = async (key, type) => {
     await sDel(key);
     if (type === 'match') {
-      setMatches(prev => prev.filter(k => k !== key));
+      setMatches(prev => prev.filter(item => item.key !== key));
     } else {
-      setLobbies(prev => prev.filter(k => k !== key));
+      setLobbies(prev => prev.filter(item => item.key !== key));
     }
   };
 
   const handleClearAll = async (type) => {
-    const keys = type === 'match' ? matches : lobbies;
-    for (const key of keys) await sDel(key);
+    const items = type === 'match' ? matches : lobbies;
+    for (const item of items) await sDel(item.key);
     if (type === 'match') setMatches([]);
     else setLobbies([]);
   };
 
-  const renderSection = (title, keys, type) => (
+  const renderSection = (title, items, type) => (
     <div style={{ marginBottom: 16 }}>
-      <h4 style={{ margin: '0 0 8px', color: '#d4a574' }}>{title} ({keys.length})</h4>
-      {keys.length === 0 ? (
+      <h4 style={{ margin: '0 0 8px', color: '#d4a574' }}>{title} ({items.length})</h4>
+      {items.length === 0 ? (
         <p style={{ fontSize: 13, color: '#886644' }}>None</p>
       ) : (
         <>
           <ul style={{ listStyle: 'none', padding: 0, margin: '0 0 8px' }}>
-            {keys.map(key => (
-              <li key={key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 0' }}>
-                <span style={{ fontSize: 13 }}>{key}</span>
-                <button onClick={() => handleClear(key, type)} style={btnStyle}>Delete</button>
+            {items.map(item => (
+              <li key={item.key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 0' }}>
+                <span style={{ fontSize: 13 }}>{item.label}</span>
+                <button onClick={() => handleClear(item.key, type)} style={btnStyle}>Delete</button>
               </li>
             ))}
           </ul>
