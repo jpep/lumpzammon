@@ -92,17 +92,23 @@ export default function GameScreen({
 
   const [selectedFrom, setSelectedFrom] = useState(null);
   const [message, setMessage] = useState('');
-  const [boardScale, setBoardScale] = useState(1);
   const BOARD_WIDTH = 620;
+  const calcScale = () => {
+    const vw = (window.visualViewport?.width || window.innerWidth) - 32;
+    return vw < BOARD_WIDTH ? vw / BOARD_WIDTH : 1;
+  };
+  const [boardScale, setBoardScale] = useState(calcScale);
 
   useEffect(() => {
-    const calc = () => {
-      const vw = window.innerWidth - 32;
-      setBoardScale(vw < BOARD_WIDTH ? vw / BOARD_WIDTH : 1);
+    const update = () => setBoardScale(calcScale());
+    window.addEventListener('resize', update);
+    window.visualViewport?.addEventListener('resize', update);
+    // Recalculate after first paint in case viewport wasn't ready
+    requestAnimationFrame(update);
+    return () => {
+      window.removeEventListener('resize', update);
+      window.visualViewport?.removeEventListener('resize', update);
     };
-    calc();
-    window.addEventListener('resize', calc);
-    return () => window.removeEventListener('resize', calc);
   }, []);
 
   const currentPlayer = gs.turn || P1;
