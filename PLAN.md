@@ -32,7 +32,7 @@ The board and screens are functional but visually basic. This phase brings them 
 - [ ] **Checker animations** - Smooth CSS transitions for moves, bar hits, bearing off
 - [ ] **Dice roll animation** - Tumble/spin before revealing values
 - [ ] **Sound effects** - Dice roll, checker place, hit, bear off, win
-- [ ] **Turn indicator** - Clear visual showing whose turn it is and what action is expected
+- [x] **Turn indicator** - Player names with stone icons, (you!) tag, action label next to active player
 - [ ] **Move history sidebar** - Scrollable log of moves in standard notation
 - [ ] **Undo button** - Allow undoing partial moves within a turn (before ending turn)
 - [ ] **Dark/light theme** - Toggle between wood tones

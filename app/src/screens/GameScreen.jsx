@@ -6,6 +6,65 @@ import {
 } from '../game/logic';
 import { aiPlay } from '../game/ai';
 
+function Stone({ player, size = 16 }) {
+  const colors = { 1: ['#f5f5dc', '#8b7355'], 2: ['#2c1810', '#5c3a21'] };
+  const [fill, border] = colors[player];
+  return (
+    <span style={{
+      display: 'inline-block',
+      width: size,
+      height: size,
+      borderRadius: '50%',
+      background: `radial-gradient(circle at 35% 35%, ${fill}, ${border})`,
+      border: `1.5px solid ${border}`,
+      verticalAlign: 'middle',
+      boxShadow: '0 1px 3px rgba(0,0,0,0.4)',
+    }} />
+  );
+}
+
+function PlayerTag({ name, player, isYou, isTurn, action, winner, align }) {
+  return (
+    <div style={{
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: align === 'right' ? 'flex-end' : 'flex-start',
+      gap: 2,
+      minWidth: 160,
+    }}>
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 6,
+        flexDirection: align === 'right' ? 'row-reverse' : 'row',
+      }}>
+        <Stone player={player} />
+        <span style={{
+          color: isTurn ? '#ffcc00' : '#f5f5dc',
+          fontWeight: isTurn ? 'bold' : 'normal',
+          fontSize: 15,
+        }}>
+          {name}
+        </span>
+        {isYou && (
+          <span style={{ color: '#5c8a2f', fontSize: 12, fontWeight: 'bold' }}>(you!)</span>
+        )}
+      </div>
+      {action && (
+        <span style={{
+          color: '#ffcc00',
+          fontSize: 12,
+          fontWeight: 'bold',
+          paddingLeft: align === 'right' ? 0 : 22,
+          paddingRight: align === 'right' ? 22 : 0,
+        }}>
+          {action}
+        </span>
+      )}
+    </div>
+  );
+}
+
 export default function GameScreen({
   mode,
   nick,
@@ -173,16 +232,28 @@ export default function GameScreen({
     <div style={containerStyle}>
       {/* Status bar */}
       <div style={statusStyle}>
-        <span>{playerName(P2)} (Black)</span>
-        <span style={{ color: '#ffcc00', fontWeight: 'bold' }}>
-          {gs.winner
-            ? `${playerName(gs.winner)} wins!`
-            : gs.phase === 'roll'
-              ? `${playerName(currentPlayer)}'s turn - Roll dice`
-              : `${playerName(currentPlayer)}'s turn - Move`
-          }
-        </span>
-        <span>{playerName(P1)} (White)</span>
+        <PlayerTag
+          name={playerName(P2)}
+          player={P2}
+          isYou={isOnline ? playerSlot === P2 : isAI ? false : false}
+          isTurn={currentPlayer === P2}
+          action={currentPlayer === P2 && !gs.winner ? (gs.phase === 'roll' ? 'Roll dice' : 'Move') : null}
+          winner={gs.winner === P2}
+        />
+        {gs.winner && (
+          <span style={{ color: '#ffcc00', fontWeight: 'bold', fontSize: 16 }}>
+            {playerName(gs.winner)} wins!
+          </span>
+        )}
+        <PlayerTag
+          name={playerName(P1)}
+          player={P1}
+          isYou={isOnline ? playerSlot === P1 : isAI ? true : false}
+          isTurn={currentPlayer === P1}
+          action={currentPlayer === P1 && !gs.winner ? (gs.phase === 'roll' ? 'Roll dice' : 'Move') : null}
+          winner={gs.winner === P1}
+          align="right"
+        />
       </div>
 
       {message && (
@@ -244,6 +315,7 @@ const containerStyle = {
 const statusStyle = {
   display: 'flex',
   justifyContent: 'space-between',
+  alignItems: 'center',
   width: 600,
   color: '#f5f5dc',
   marginBottom: 12,
