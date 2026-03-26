@@ -3,25 +3,59 @@ import { sList, sDel } from '../storage';
 
 export default function AdminPanel({ onClose }) {
   const [matches, setMatches] = useState([]);
+  const [lobbies, setLobbies] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     (async () => {
-      const keys = await sList('bg:match:');
-      setMatches(keys);
+      const [matchKeys, lobbyKeys] = await Promise.all([
+        sList('bg:match:'),
+        sList('bg:lobby:'),
+      ]);
+      setMatches(matchKeys);
+      setLobbies(lobbyKeys);
       setLoading(false);
     })();
   }, []);
 
-  const handleClear = async (key) => {
+  const handleClear = async (key, type) => {
     await sDel(key);
-    setMatches(prev => prev.filter(k => k !== key));
+    if (type === 'match') {
+      setMatches(prev => prev.filter(k => k !== key));
+    } else {
+      setLobbies(prev => prev.filter(k => k !== key));
+    }
   };
 
-  const handleClearAll = async () => {
-    for (const key of matches) await sDel(key);
-    setMatches([]);
+  const handleClearAll = async (type) => {
+    const keys = type === 'match' ? matches : lobbies;
+    for (const key of keys) await sDel(key);
+    if (type === 'match') setMatches([]);
+    else setLobbies([]);
   };
+
+  const renderSection = (title, keys, type) => (
+    <div style={{ marginBottom: 16 }}>
+      <h4 style={{ margin: '0 0 8px', color: '#d4a574' }}>{title} ({keys.length})</h4>
+      {keys.length === 0 ? (
+        <p style={{ fontSize: 13, color: '#886644' }}>None</p>
+      ) : (
+        <>
+          <ul style={{ listStyle: 'none', padding: 0, margin: '0 0 8px' }}>
+            {keys.map(key => (
+              <li key={key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 0' }}>
+                <span style={{ fontSize: 13 }}>{key}</span>
+                <button onClick={() => handleClear(key, type)} style={btnStyle}>Delete</button>
+              </li>
+            ))}
+          </ul>
+          <button onClick={() => handleClearAll(type)} style={{ ...btnStyle, background: '#8b0000' }}>
+            Clear All
+          </button>
+        </>
+      )}
+    </div>
+  );
 
   return (
     <div style={{
@@ -44,22 +78,11 @@ export default function AdminPanel({ onClose }) {
       }}>
         <h3 style={{ margin: '0 0 16px' }}>Admin Panel</h3>
         {loading ? (
-          <p>Loading matches...</p>
-        ) : matches.length === 0 ? (
-          <p>No active matches</p>
+          <p>Loading...</p>
         ) : (
           <>
-            <ul style={{ listStyle: 'none', padding: 0, margin: '0 0 16px' }}>
-              {matches.map(key => (
-                <li key={key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 0' }}>
-                  <span style={{ fontSize: 13 }}>{key}</span>
-                  <button onClick={() => handleClear(key)} style={btnStyle}>Delete</button>
-                </li>
-              ))}
-            </ul>
-            <button onClick={handleClearAll} style={{ ...btnStyle, background: '#8b0000' }}>
-              Clear All Matches
-            </button>
+            {renderSection('Active Matches', matches, 'match')}
+            {renderSection('Open Lobbies', lobbies, 'lobby')}
           </>
         )}
         <div style={{ marginTop: 16 }}>
