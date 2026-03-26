@@ -70,7 +70,7 @@ lumpzammon/
 ### Screen Flow
 
 ```
-MenuScreen (enter nickname)
+MenuScreen (enter nickname, shows "Lumpzammon!" title)
     └─► ModeSelectScreen (local / ai / online)
             ├─► GameScreen (local or ai mode)
             └─► LobbyScreen (create or join)

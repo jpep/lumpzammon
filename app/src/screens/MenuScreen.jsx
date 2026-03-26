@@ -6,7 +6,7 @@ export default function MenuScreen({ onStart }) {
 
   return (
     <div style={containerStyle}>
-      <h1 style={{ color: theme.text, fontSize: 36, marginBottom: 4, letterSpacing: 2 }}>Lumpzammon</h1>
+      <h1 style={{ color: theme.text, fontSize: 36, marginBottom: 4, letterSpacing: 2 }}>Lumpzammon!</h1>
       <div style={{ width: 120, height: 2, background: theme.gold, marginBottom: 24 }} />
       <input
         type="text"
