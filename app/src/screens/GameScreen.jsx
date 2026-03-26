@@ -27,38 +27,30 @@ function PlayerTag({ name, player, isYou, isTurn, action, winner, align }) {
   return (
     <div style={{
       display: 'flex',
-      flexDirection: 'column',
-      alignItems: align === 'right' ? 'flex-end' : 'flex-start',
-      gap: 2,
+      alignItems: 'center',
+      gap: 6,
+      flexDirection: align === 'right' ? 'row-reverse' : 'row',
       minWidth: 160,
     }}>
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 6,
-        flexDirection: align === 'right' ? 'row-reverse' : 'row',
+      <Stone player={player} />
+      <span style={{
+        color: isTurn ? '#ffcc00' : '#f5f5dc',
+        fontWeight: isTurn ? 'bold' : 'normal',
+        fontSize: 15,
       }}>
-        <Stone player={player} />
-        <span style={{
-          color: isTurn ? '#ffcc00' : '#f5f5dc',
-          fontWeight: isTurn ? 'bold' : 'normal',
-          fontSize: 15,
-        }}>
-          {name}
-        </span>
-        {isYou && (
-          <span style={{ color: '#5c8a2f', fontSize: 12, fontWeight: 'bold' }}>(you!)</span>
-        )}
-      </div>
+        {name}
+      </span>
+      {isYou && (
+        <span style={{ color: '#5c8a2f', fontSize: 12, fontWeight: 'bold' }}>(you!)</span>
+      )}
       {action && (
         <span style={{
           color: '#ffcc00',
           fontSize: 12,
           fontWeight: 'bold',
-          paddingLeft: align === 'right' ? 0 : 22,
-          paddingRight: align === 'right' ? 22 : 0,
+          fontStyle: 'italic',
         }}>
-          {action}
+          — {action}
         </span>
       )}
     </div>
@@ -75,11 +67,6 @@ export default function GameScreen({
 }) {
   const isOnline = mode === 'online';
   const isAI = mode === 'ai';
-
-  const getState = () => {
-    if (isOnline && matchData?.state) return clone(matchData.state);
-    return null;
-  };
 
   const [localState, setLocalState] = useState(() => newGameState());
   const rawGs = isOnline ? (matchData?.state || localState) : localState;

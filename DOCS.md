@@ -115,7 +115,7 @@ All game rules live in `src/game/logic.js` as pure functions with no dependencie
 
 ### Status Bar
 
-Each player is shown with a rendered stone icon (white/black gradient) and their nickname. In online and AI modes, a green **(you!)** tag marks the local player. The active player's name highlights in yellow with an action label ("Roll dice" or "Move") underneath.
+Each player is shown with a rendered stone icon (white/black gradient) and their nickname. In online and AI modes, a green **(you!)** tag marks the local player. The active player's name highlights in yellow with an action label ("Roll dice" or "Move") inline towards the center.
 
 ## Development
 
