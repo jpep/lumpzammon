@@ -37,7 +37,16 @@ export default function ModeSelectScreen({ nick, onSelectMode, onBack }) {
 
   return (
     <div style={containerStyle}>
-      <h2 style={{ color: theme.text, marginBottom: 8 }}>Welcome, {nick}</h2>
+      <h2 style={{
+        marginBottom: 8,
+        ...(theme.decorations === 'rainbow'
+          ? {
+              background: 'linear-gradient(90deg, #ff0000, #ff8800, #ffdd00, #00cc44, #0088ff, #aa44ff, #ff44aa)',
+              WebkitBackgroundClip: 'text',
+              WebkitTextFillColor: 'transparent',
+            }
+          : { color: theme.text }),
+      }}>Welcome, {nick}</h2>
       <p style={{ color: theme.textSecondary, marginBottom: 32 }}>Choose game mode</p>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>

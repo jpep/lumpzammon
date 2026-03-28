@@ -8,6 +8,7 @@ import AdminPanel from './components/AdminPanel';
 import BuildInfo from './components/BuildInfo';
 import useOnlineMatch from './hooks/useOnlineMatch';
 import useKickDetection from './hooks/useKickDetection';
+import RainbowDecorations from './components/RainbowDecorations';
 import { getTheme } from './theme';
 import { ThemeProvider } from './ThemeContext';
 
@@ -98,6 +99,7 @@ export default function App() {
         />
       )}
 
+      <RainbowDecorations />
       <BuildInfo />
 
       {/* Admin toggle: double-click or long-tap (mobile) */}
