@@ -37,7 +37,7 @@ The board and screens are functional but visually basic. This phase brings them 
 - [x] **Turn indicator** - Player names with stone icons, (you!) tag, action label next to active player
 - [ ] **Move history sidebar** - Scrollable log of moves in standard notation
 - [ ] **Undo button** - Allow undoing partial moves within a turn (before ending turn)
-- [x] **User-based theme customization** - Nickname-driven themes: "jugo" gets sepia, "pepo" gets marine colors (via ThemeContext)
+- [x] **User-based theme customization** - Nickname-driven themes: "jugo" gets sepia, "pepo" gets marine, "simon" gets rainbow with floating stars/flowers (via ThemeContext)
 - [ ] **Dark/light theme** - Toggle between wood tones
 
 ---

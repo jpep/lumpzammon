@@ -129,11 +129,56 @@ const marineTheme = {
   diceUsedDot: '#1a2a3a',
 };
 
+// Rainbow theme for user "simon" — vibrant rainbow colors, stars ✦ and flowers ✿
+const rainbowTheme = {
+  bg: '#1a0a2e',             // deep purple night sky
+  bgPanel: '#2a1248',        // dark violet panel
+  bgBoard: '#3b1f6e',        // rich purple board
+  bgBar: '#1a0a2e',          // matches page bg
+  bgBearoff: '#1a0a2e',
+  bgBearoffActive: '#4a2080',
+
+  border: '#ff6ec7',          // hot pink border
+  borderBoard: '#6a3d9a',     // purple board frame
+  borderBtn: '#ff4da6',       // pink button border
+
+  text: '#ffffff',             // white text
+  textSecondary: '#ffda44',    // sunny yellow
+  textMuted: '#8866aa',        // muted lavender
+  textHighlight: '#00ffaa',    // bright mint green — active player
+  textYou: '#ff6ec7',         // hot pink — (you!)
+
+  btnBg: '#e63caa',           // vivid magenta
+  btnText: '#ffffff',
+  btnBgDanger: '#aa1470',     // deep magenta
+  btnOutlineBorder: '#ff6ec7',
+  btnOutlineText: '#ffda44',
+
+  accent: '#ff6ec7',          // hot pink accent
+  gold: '#ffda44',            // sunny yellow (replaces gold)
+  goldBright: '#00ffaa',      // bright mint
+
+  checkerWhite: ['#ff6ec7', '#ff4da6'],   // pink checker
+  checkerBlack: ['#6a3d9a', '#4a2080'],   // purple checker
+
+  triangleDark: '#e63caa',    // magenta triangles
+  triangleLight: '#44bbff',   // sky blue triangles
+
+  diceBg: '#ffda44',          // yellow dice
+  diceDot: '#1a0a2e',         // deep purple dots
+  diceUsedBg: '#4a2080',
+  diceUsedDot: '#2a1248',
+
+  // Special decorations flag — components can check for this
+  decorations: 'rainbow',
+};
+
 // Returns the theme matching the given nickname
 export function getTheme(nick) {
   const name = (nick || '').trim().toLowerCase();
   if (name === 'jugo') return sepiaTheme;
   if (name === 'pepo') return marineTheme;
+  if (name === 'simon') return rainbowTheme;
   return defaultTheme;
 }
 

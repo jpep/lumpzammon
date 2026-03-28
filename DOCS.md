@@ -53,6 +53,7 @@ lumpzammon/
         │   ├── Checker.jsx        # Game piece (white/black)
         │   ├── DiceFace.jsx       # Die face with dot layout
         │   ├── BarZone.jsx        # Captured pieces area
+        │   ├── RainbowDecorations.jsx # Animated stars/flowers overlay for rainbow theme
         │   ├── AdminPanel.jsx     # Match + lobby management overlay
         │   └── BuildInfo.jsx      # Deploy info (commit, author, date)
         ├── screens/               # Full-page views
@@ -137,8 +138,11 @@ Three theme variants are available:
 | Default | Any other name    | Casino — black, white, red, gold           |
 | Sepia   | Nickname "jugo"   | Warm browns, tans, parchment tones         |
 | Marine  | Nickname "pepo"   | Deep blues, teals, ocean tones             |
+| Rainbow | Nickname "simon"  | Vibrant rainbow colors, floating stars & flowers, gradient text |
 
 The theme is selected automatically based on the player's nickname (case-insensitive, exact match). The `getTheme(nick)` function in `theme.js` handles the mapping. All components consume the theme via the `useTheme()` hook from `ThemeContext.jsx`.
+
+The Rainbow theme includes a special `decorations` property that triggers the `RainbowDecorations` component (`src/components/RainbowDecorations.jsx`), which renders animated floating stars (✦⭐), flowers (✿❀), and rainbows (🌈) as a fixed overlay. The title text also gets a rainbow gradient effect.
 
 ### Status Bar
 
