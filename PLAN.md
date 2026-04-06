@@ -121,6 +121,12 @@ The current AI is a single-step greedy evaluator. It works but is beatable.
 
 ---
 
+## Bug Fixes
+
+- [x] **Fix duplicated checkers on bar (PR #9)** — Hit checkers appeared twice on the bar because `BarZone` was rendered in both board halves showing all players. Added `player` prop to `BarZone` so each half only shows the relevant player's checkers. Also restored `Board.jsx` to a valid component (PR had accidentally stripped the module wrapper).
+
+---
+
 ## How to Use This Plan
 
 When starting a session with Claude Code:

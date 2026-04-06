@@ -190,6 +190,12 @@ Live URL: https://jpep.github.io/lumpzammon/
   - **GitHub Pages**: injected via repository secrets during the Actions build step
   - Firebase project: `lumpzammon` (Spark/free plan, Realtime Database)
 
+## Bug Fixes
+
+### Fix duplicated checkers on the bar (2026-04-06)
+
+PR #9 identified a bug where hit checkers appeared duplicated on the bar — `Board` rendered `<BarZone>` twice (once per half) and each instance rendered both players. The fix passes a `player` prop to `BarZone` (`player={2}` in the top half, `player={1}` in the bottom half) so each instance only renders one player's hit checkers. PR #9's Board.jsx was also restored to a valid component (it had been accidentally reduced to a JSX fragment).
+
 ## Origin
 
 This project was scaffolded from a conversation with Claude Desktop. The seed files in `claude_seed/` contain the original artifacts: project structure, storage layer design, Firebase setup guide, and game logic. The React components, screens, hooks, Docker setup, and App router were built from these blueprints.
