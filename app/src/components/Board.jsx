@@ -100,6 +100,9 @@ export default function Board({
   };
 
   const bearOffLeft = direction === 1;
+  // 180° rotation: swap which player's bar/off goes on which half
+  const topPlayer = direction === 1 ? 1 : 2;
+  const botPlayer = direction === 1 ? 2 : 1;
 
   return (
     <div style={{
@@ -114,28 +117,28 @@ export default function Board({
     }}>
       {/* Top half */}
       <div style={{ display: 'flex' }}>
-        {bearOffLeft && offZone(2, 'flex-start')}
+        {bearOffLeft && offZone(topPlayer, 'flex-start')}
         <div style={{ display: 'flex' }}>
           {renderHalf(topIdx.slice(0, 6), true)}
         </div>
-        <BarZone bar={bar} player={2} isMovable={movableSources.has('bar')} onClickBar={onClickBar} selectedFrom={selectedFrom} animatingFrom={animatingFrom} animatingPlayer={animatingPlayer} />
+        <BarZone bar={bar} player={topPlayer} isMovable={movableSources.has('bar')} onClickBar={onClickBar} selectedFrom={selectedFrom} animatingFrom={animatingFrom} animatingPlayer={animatingPlayer} />
         <div style={{ display: 'flex' }}>
           {renderHalf(topIdx.slice(7), true)}
         </div>
-        {!bearOffLeft && offZone(2, 'flex-start')}
+        {!bearOffLeft && offZone(topPlayer, 'flex-start')}
       </div>
 
       {/* Bottom half */}
       <div style={{ display: 'flex' }}>
-        {bearOffLeft && offZone(1, 'flex-end')}
+        {bearOffLeft && offZone(botPlayer, 'flex-end')}
         <div style={{ display: 'flex' }}>
           {renderHalf(botIdx.slice(0, 6), false)}
         </div>
-        <BarZone bar={bar} player={1} isMovable={movableSources.has('bar')} onClickBar={onClickBar} selectedFrom={selectedFrom} animatingFrom={animatingFrom} animatingPlayer={animatingPlayer} />
+        <BarZone bar={bar} player={botPlayer} isMovable={movableSources.has('bar')} onClickBar={onClickBar} selectedFrom={selectedFrom} animatingFrom={animatingFrom} animatingPlayer={animatingPlayer} />
         <div style={{ display: 'flex' }}>
           {renderHalf(botIdx.slice(7), false)}
         </div>
-        {!bearOffLeft && offZone(1, 'flex-end')}
+        {!bearOffLeft && offZone(botPlayer, 'flex-end')}
       </div>
     </div>
   );

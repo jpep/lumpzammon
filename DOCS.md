@@ -192,7 +192,7 @@ Live URL: https://jpep.github.io/lumpzammon/
 
 ## Alternating Board Direction
 
-The board direction alternates each new game, like flipping seats at a real backgammon table. A `direction` state (0 or 1) in `GameScreen.jsx` toggles on "New Game". `getBoardIndices(dir)` in `logic.js` returns flipped index arrays, and `Board.jsx` conditionally places bear-off zones on the left or right side accordingly. Game logic is unchanged — only the visual mapping of indices to screen positions flips. Bear-off zones display a "home" label with a directional arrow so players always know which side to move toward.
+The board direction alternates each new game, like flipping seats at a real backgammon table. A `direction` state (0 or 1) in `GameScreen.jsx` toggles on "New Game". `getBoardIndices(dir)` in `logic.js` returns flipped index arrays, and `Board.jsx` conditionally places bear-off zones on the left or right side accordingly. Game logic is unchanged — only the visual mapping of indices to screen positions changes. The flip is a full 180° rotation: top/bottom halves swap, left/right swap, and each player's bar and bear-off zone move to the correct half. Bear-off zones display a "home" label highlighted for the current player. In online mode, direction is derived from `playerSlot` — each player sees their own home on the bottom half of the screen, like sitting across a real table.
 
 ## Pip Count
 
