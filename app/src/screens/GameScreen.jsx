@@ -7,6 +7,7 @@ import {
   newGameState, rollDice, getValidMoves, applyMove, checkWin, clone, calcPipCount, P1, P2
 } from '../game/logic';
 import { aiPlay } from '../game/ai';
+import { saveLocalGame, loadLocalGame, clearLocalGame } from '../storage/local';
 
 function Stone({ player, size = 16 }) {
   const theme = useTheme();
@@ -94,8 +95,20 @@ export default function GameScreen({
   const isOnline = mode === 'online';
   const isAI = mode === 'ai';
 
-  const [localState, setLocalState] = useState(() => newGameState());
-  const [localDirection, setLocalDirection] = useState(0);
+  const [localState, setLocalState] = useState(() => {
+    if (!isOnline) {
+      const saved = loadLocalGame();
+      if (saved && saved.mode === mode && saved.state) return saved.state;
+    }
+    return newGameState();
+  });
+  const [localDirection, setLocalDirection] = useState(() => {
+    if (!isOnline) {
+      const saved = loadLocalGame();
+      if (saved && saved.mode === mode) return saved.direction || 0;
+    }
+    return 0;
+  });
   const direction = isOnline ? (playerSlot === P2 ? 1 : 0) : localDirection;
   const rawGs = isOnline ? (matchData?.state || localState) : localState;
   const gs = {
@@ -116,6 +129,11 @@ export default function GameScreen({
     return vw < BOARD_WIDTH ? vw / BOARD_WIDTH : 1;
   };
   const [boardScale, setBoardScale] = useState(calcScale);
+
+  // Persist local/AI game state across page reloads
+  useEffect(() => {
+    if (!isOnline) saveLocalGame(mode, localState, localDirection);
+  }, [isOnline, mode, localState, localDirection]);
 
   // Animation state
   const [flyingChecker, setFlyingChecker] = useState(null);
@@ -547,7 +565,7 @@ export default function GameScreen({
         )}
       </div>
 
-      <button onClick={onBack} style={{ ...btnSmall, marginTop: 24 }}>
+      <button onClick={() => { if (!isOnline) clearLocalGame(); onBack(); }} style={{ ...btnSmall, marginTop: 24 }}>
         Leave Game
       </button>
     </div>

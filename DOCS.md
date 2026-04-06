@@ -92,7 +92,7 @@ Detection is automatic. The `sSubscribe` function uses Firebase's `onValue` for 
 
 ### Game Persistence & Reconnection
 
-Online matches persist in Firebase across browser sessions. The local storage layer (`src/storage/local.js`) saves the player's nickname and active match session (matchId + playerSlot) to `localStorage`.
+All game modes persist across browser reloads. Online matches use Firebase + localStorage session. Local and AI games save state and board direction to `localStorage` on every change, and restore on page load (skipped if the game was already won). Clicking "Leave Game" clears the saved state. The local storage layer (`src/storage/local.js`) saves the player's nickname and active match session (matchId + playerSlot) to `localStorage`.
 
 **How it works:**
 

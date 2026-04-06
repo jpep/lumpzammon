@@ -11,7 +11,7 @@ import useKickDetection from './hooks/useKickDetection';
 import RainbowDecorations from './components/RainbowDecorations';
 import { getTheme } from './theme';
 import { ThemeProvider } from './ThemeContext';
-import { loadNick, saveNick, clearNick, loadSession, clearSession } from './storage/local';
+import { loadNick, saveNick, clearNick, loadSession, clearSession, loadLocalGame } from './storage/local';
 
 export default function App() {
   const [screen, setScreen] = useState('menu');
@@ -25,17 +25,27 @@ export default function App() {
     useOnlineMatch(nick);
   const kicked = useKickDetection(matchId, playerSlot);
 
-  // On mount, try to reconnect to a saved session
+  // On mount, try to reconnect to a saved session (online or local/AI)
   useEffect(() => {
     if (reconnectAttempted.current) return;
     reconnectAttempted.current = true;
 
     const savedNick = loadNick();
-    const session = loadSession();
-    if (!savedNick || !session) return;
+    if (!savedNick) return;
 
-    // Set nick first so the hook has it, then attempt reconnect
-    setNick(savedNick);
+    const session = loadSession();
+    if (session) {
+      // Online session — set nick so the hook can reconnect
+      setNick(savedNick);
+      return;
+    }
+
+    const localGame = loadLocalGame();
+    if (localGame && localGame.state && !localGame.state.winner) {
+      setNick(savedNick);
+      setMode(localGame.mode);
+      setScreen('game');
+    }
   }, []);
 
   // Once nick is set from localStorage, attempt reconnect

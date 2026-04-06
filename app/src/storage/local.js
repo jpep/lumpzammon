@@ -31,3 +31,23 @@ export function loadSession() {
 export function clearSession() {
   try { localStorage.removeItem(SESSION_KEY); } catch (e) { /* noop */ }
 }
+
+// Local/AI game persistence across page reloads
+const LOCAL_GAME_KEY = 'bg:localGame';
+
+export function saveLocalGame(mode, state, direction) {
+  try {
+    localStorage.setItem(LOCAL_GAME_KEY, JSON.stringify({ mode, state, direction }));
+  } catch (e) { /* noop */ }
+}
+
+export function loadLocalGame() {
+  try {
+    const raw = localStorage.getItem(LOCAL_GAME_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch (e) { return null; }
+}
+
+export function clearLocalGame() {
+  try { localStorage.removeItem(LOCAL_GAME_KEY); } catch (e) { /* noop */ }
+}
