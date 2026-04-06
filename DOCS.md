@@ -43,7 +43,8 @@ lumpzammon/
         ├── storage/               # Storage abstraction layer
         │   ├── index.js           # Auto-detects environment
         │   ├── artifactAdapter.js # Claude artifact sandbox adapter
-        │   └── firebaseAdapter.js # Firebase Realtime DB adapter
+        │   ├── firebaseAdapter.js # Firebase Realtime DB adapter
+        │   └── local.js           # localStorage helpers (nick, session)
         ├── game/                  # Pure game logic (no React)
         │   ├── logic.js           # Board setup, rules, move validation
         │   └── ai.js              # AI evaluation + move selection
@@ -88,6 +89,24 @@ The storage layer (`src/storage/`) provides a unified API (`sGet`, `sSet`, `sDel
 - **Hosted deployment**: Uses Firebase Realtime Database
 
 Detection is automatic. The `sSubscribe` function uses Firebase's `onValue` for real-time sync, falling back to polling in the artifact environment.
+
+### Game Persistence & Reconnection
+
+All game modes persist across browser reloads. Online matches use Firebase + localStorage session. Local and AI games save state and board direction to `localStorage` on every change, and restore on page load (skipped if the game was already won). Clicking "Leave Game" clears the saved state. The local storage layer (`src/storage/local.js`) saves the player's nickname and active match session (matchId + playerSlot) to `localStorage`.
+
+**How it works:**
+
+1. When a player creates or joins a match, the session is saved to `localStorage`
+2. The nickname is also saved, so the menu screen pre-fills it on return
+3. On app load, if a saved session exists, the app attempts to reconnect to the match in Firebase
+4. Reconnection verifies the match still exists and the player's nickname matches the stored slot
+5. If reconnection succeeds, the player goes straight to the game screen
+6. If the match no longer exists (opponent left, etc.), the saved session is cleared and the menu is shown
+
+**Explicit leave vs. disconnect:**
+
+- Clicking "Leave Game" deletes the match from Firebase and clears localStorage — the game is gone
+- Closing the browser (or navigating away) keeps the match in Firebase — both players can reconnect later
 
 ### Game Logic
 

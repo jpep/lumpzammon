@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import { useTheme } from '../ThemeContext';
+import { loadNick } from '../storage/local';
 
 export default function MenuScreen({ onStart }) {
-  const [nick, setNick] = useState('');
+  const [nick, setNick] = useState(() => loadNick());
   const theme = useTheme();
 
   const containerStyle = {
