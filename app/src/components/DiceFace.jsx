@@ -10,7 +10,7 @@ const DOT_POSITIONS = {
   6: [[0,0],[0,1],[0,2],[2,0],[2,1],[2,2]],
 };
 
-export default function DiceFace({ value, used, onClick }) {
+export default function DiceFace({ value, used, selected, onClick }) {
   const theme = useTheme();
   const dots = DOT_POSITIONS[value] || [];
   return (
@@ -28,7 +28,11 @@ export default function DiceFace({ value, used, onClick }) {
         gap: 2,
         opacity: used ? 0.4 : 1,
         cursor: onClick ? 'pointer' : 'default',
-        boxShadow: '0 2px 6px rgba(0,0,0,0.5)',
+        boxShadow: selected
+          ? `0 0 10px 3px ${theme.goldBright}`
+          : '0 2px 6px rgba(0,0,0,0.5)',
+        border: selected ? `2px solid ${theme.goldBright}` : '2px solid transparent',
+        transition: 'box-shadow 0.15s, border 0.15s',
       }}
     >
       {Array.from({ length: 9 }, (_, i) => {

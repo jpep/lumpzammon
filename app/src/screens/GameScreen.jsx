@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Board from '../components/Board';
+import Checker from '../components/Checker';
 import DiceFace from '../components/DiceFace';
 import { useTheme } from '../ThemeContext';
 import {
-  newGameState, rollDice, getValidMoves, applyMove, checkWin, clone, P1, P2
+  newGameState, rollDice, getValidMoves, applyMove, checkWin, clone, calcPipCount, P1, P2
 } from '../game/logic';
 import { aiPlay } from '../game/ai';
 
@@ -25,7 +26,7 @@ function Stone({ player, size = 16 }) {
   );
 }
 
-function PlayerTag({ name, player, isYou, isTurn, action, winner, align }) {
+function PlayerTag({ name, player, isYou, isTurn, action, winner, align, pip }) {
   const theme = useTheme();
   const isRight = align === 'right';
   const actionStyle = {
@@ -39,11 +40,16 @@ function PlayerTag({ name, player, isYou, isTurn, action, winner, align }) {
     fontWeight: isTurn ? 'bold' : 'normal',
     fontSize: 15,
   };
+  const pipStyle = {
+    color: theme.textSecondary,
+    fontSize: 11,
+  };
   const youTag = isYou && (
     <span style={{ color: theme.textYou, fontSize: 12, fontWeight: 'bold' }}>(you!)</span>
   );
   const sep = action && <span style={actionStyle}>—</span>;
   const act = action && <span style={actionStyle}>{action}</span>;
+  const pipTag = pip != null && <span style={pipStyle}>pip {pip}</span>;
 
   return (
     <div style={{
@@ -56,6 +62,7 @@ function PlayerTag({ name, player, isYou, isTurn, action, winner, align }) {
       {isRight && <>{act}{sep}</>}
       {isRight ? (
         <>
+          {pipTag}
           <span style={nameStyle}>{name}</span>
           {youTag}
           <Stone player={player} />
@@ -65,12 +72,15 @@ function PlayerTag({ name, player, isYou, isTurn, action, winner, align }) {
           <Stone player={player} />
           <span style={nameStyle}>{name}</span>
           {youTag}
+          {pipTag}
         </>
       )}
       {!isRight && <>{sep}{act}</>}
     </div>
   );
 }
+
+const ANIMATION_DURATION = 300;
 
 export default function GameScreen({
   mode,
@@ -85,6 +95,8 @@ export default function GameScreen({
   const isAI = mode === 'ai';
 
   const [localState, setLocalState] = useState(() => newGameState());
+  const [localDirection, setLocalDirection] = useState(0);
+  const direction = isOnline ? (playerSlot === P2 ? 1 : 0) : localDirection;
   const rawGs = isOnline ? (matchData?.state || localState) : localState;
   const gs = {
     ...rawGs,
@@ -95,13 +107,21 @@ export default function GameScreen({
   };
 
   const [selectedFrom, setSelectedFrom] = useState(null);
+  const [selectedDie, setSelectedDie] = useState(null);
   const [message, setMessage] = useState('');
+  const [passOverlay, setPassOverlay] = useState(null);
   const BOARD_WIDTH = 620;
   const calcScale = () => {
     const vw = (window.visualViewport?.width || window.innerWidth) - 32;
     return vw < BOARD_WIDTH ? vw / BOARD_WIDTH : 1;
   };
   const [boardScale, setBoardScale] = useState(calcScale);
+
+  // Animation state
+  const [flyingChecker, setFlyingChecker] = useState(null);
+  const [animatingFrom, setAnimatingFrom] = useState(null);
+  const [animatingPlayer, setAnimatingPlayer] = useState(null);
+  const isAnimatingRef = useRef(false);
 
   useEffect(() => {
     const update = () => setBoardScale(calcScale());
@@ -117,7 +137,13 @@ export default function GameScreen({
 
   const currentPlayer = gs.turn || P1;
   const myTurn = isOnline ? (playerSlot === currentPlayer) : true;
-  const validMoves = gs.phase === 'move' ? getValidMoves(gs, currentPlayer) : [];
+  const allValidMoves = gs.phase === 'move' ? getValidMoves(gs, currentPlayer) : [];
+  const validMoves = selectedDie != null
+    ? allValidMoves.filter(m => m.d === selectedDie)
+    : allValidMoves;
+  const movableSources = new Set(validMoves.map(m => m.f));
+  const pip1 = calcPipCount(gs, P1);
+  const pip2 = calcPipCount(gs, P2);
 
   const updateState = useCallback((newState) => {
     if (isOnline) {
@@ -126,6 +152,56 @@ export default function GameScreen({
       setLocalState(newState);
     }
   }, [isOnline, onUpdateMatch]);
+
+  const getElementCenter = (selector) => {
+    const el = document.querySelector(selector);
+    if (!el) return null;
+    const rect = el.getBoundingClientRect();
+    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+  };
+
+  const animateAndExecute = useCallback((move, player, callback) => {
+    // Calculate source position
+    let fromPos;
+    if (move.f === 'bar') {
+      fromPos = getElementCenter(`[data-bar-player="${player}"]`);
+    } else {
+      fromPos = getElementCenter(`[data-point-id="${move.f}"]`);
+    }
+
+    // Calculate destination position
+    let toPos;
+    if (move.t === 'off') {
+      toPos = getElementCenter(`[data-point-id="off-${player}"]`);
+    } else {
+      toPos = getElementCenter(`[data-point-id="${move.t}"]`);
+    }
+
+    if (!fromPos || !toPos) {
+      callback();
+      return;
+    }
+
+    // Hide source checker and show flying checker
+    setAnimatingFrom(move.f);
+    setAnimatingPlayer(player);
+    setFlyingChecker({ from: fromPos, to: toPos, player, arrived: false });
+
+    // Trigger transition in next frames
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        setFlyingChecker(prev => prev ? { ...prev, arrived: true } : null);
+      });
+    });
+
+    // After animation completes, apply state
+    setTimeout(() => {
+      setFlyingChecker(null);
+      setAnimatingFrom(null);
+      setAnimatingPlayer(null);
+      callback();
+    }, ANIMATION_DURATION + 50);
+  }, []);
 
   const handleRoll = useCallback(() => {
     if (gs.phase !== 'roll') return;
@@ -144,52 +220,59 @@ export default function GameScreen({
       newGs.turn = newGs.turn === P1 ? P2 : P1;
       newGs.dice = [];
       newGs.moves = [];
-      setMessage(`No valid moves! Turn passes.`);
-      setTimeout(() => setMessage(''), 2000);
+      setSelectedDie(null);
+      setPassOverlay(currentPlayer);
+      setTimeout(() => setPassOverlay(null), 2000);
+    } else {
+      setSelectedDie(dice[0]);
     }
 
     updateState(newGs);
   }, [gs, currentPlayer, myTurn, isOnline, updateState]);
 
-  // AI turn — apply one move at a time so each is visually distinct
+  // AI turn — apply one move at a time with animation
   useEffect(() => {
     if (!isAI || currentPlayer !== P2 || gs.phase !== 'move') return;
+    if (isAnimatingRef.current) return;
+
     const timer = setTimeout(() => {
       const { seq } = aiPlay(gs, P2);
       if (seq.length === 0) {
-        // No valid moves — end turn
         const newGs = clone(gs);
         newGs.phase = 'roll';
         newGs.turn = P1;
         newGs.dice = [];
         newGs.moves = [];
-        setMessage('No valid moves! Turn passes.');
-        setTimeout(() => setMessage(''), 2000);
+        setPassOverlay(P2);
+        setTimeout(() => setPassOverlay(null), 2000);
         updateState(newGs);
         return;
       }
 
-      // Apply only the first move; the effect re-triggers for subsequent moves
-      const newGs = applyMove(gs, P2, seq[0]);
+      isAnimatingRef.current = true;
+      animateAndExecute(seq[0], P2, () => {
+        const newGs = applyMove(gs, P2, seq[0]);
 
-      const remaining = getValidMoves(newGs, P2);
-      if (remaining.length === 0 || newGs.moves.length === 0) {
-        const w = checkWin(newGs);
-        if (w) {
-          newGs.winner = w;
-          newGs.phase = 'done';
-        } else {
-          newGs.phase = 'roll';
-          newGs.turn = P1;
-          newGs.dice = [];
-          newGs.moves = [];
+        const remaining = getValidMoves(newGs, P2);
+        if (remaining.length === 0 || newGs.moves.length === 0) {
+          const w = checkWin(newGs);
+          if (w) {
+            newGs.winner = w;
+            newGs.phase = 'done';
+          } else {
+            newGs.phase = 'roll';
+            newGs.turn = P1;
+            newGs.dice = [];
+            newGs.moves = [];
+          }
         }
-      }
 
-      updateState(newGs);
+        updateState(newGs);
+        isAnimatingRef.current = false;
+      });
     }, 750);
     return () => clearTimeout(timer);
-  }, [isAI, currentPlayer, gs, updateState]);
+  }, [isAI, currentPlayer, gs, updateState, animateAndExecute]);
 
   // AI auto-roll
   useEffect(() => {
@@ -199,6 +282,7 @@ export default function GameScreen({
   }, [isAI, currentPlayer, gs.phase, gs.winner, handleRoll]);
 
   const handleClickChecker = (from) => {
+    if (isAnimatingRef.current) return;
     if (!myTurn || gs.phase !== 'move') return;
     if (isAI && currentPlayer === P2) return;
 
@@ -234,33 +318,45 @@ export default function GameScreen({
   };
 
   const executeMove = (move) => {
-    const newGs = applyMove(gs, currentPlayer, move);
-    const w = checkWin(newGs);
-    if (w) {
-      newGs.winner = w;
-      newGs.phase = 'done';
+    if (isAnimatingRef.current) return;
+    isAnimatingRef.current = true;
+
+    animateAndExecute(move, currentPlayer, () => {
+      const newGs = applyMove(gs, currentPlayer, move);
+      const w = checkWin(newGs);
+      if (w) {
+        newGs.winner = w;
+        newGs.phase = 'done';
+        updateState(newGs);
+        setSelectedFrom(null);
+        isAnimatingRef.current = false;
+        return;
+      }
+
+      const remaining = getValidMoves(newGs, currentPlayer);
+      if (remaining.length === 0 || newGs.moves.length === 0) {
+        newGs.phase = 'roll';
+        newGs.turn = currentPlayer === P1 ? P2 : P1;
+        newGs.dice = [];
+        newGs.moves = [];
+        setSelectedDie(null);
+      } else {
+        setSelectedDie(newGs.moves[0]);
+      }
+
       updateState(newGs);
       setSelectedFrom(null);
-      return;
-    }
-
-    const remaining = getValidMoves(newGs, currentPlayer);
-    if (remaining.length === 0 || newGs.moves.length === 0) {
-      newGs.phase = 'roll';
-      newGs.turn = currentPlayer === P1 ? P2 : P1;
-      newGs.dice = [];
-      newGs.moves = [];
-    }
-
-    updateState(newGs);
-    setSelectedFrom(null);
+      isAnimatingRef.current = false;
+    });
   };
 
   const handleNewGame = () => {
     const fresh = newGameState();
     updateState(fresh);
     setSelectedFrom(null);
+    setSelectedDie(null);
     setMessage('');
+    setLocalDirection(d => d === 0 ? 1 : 0);
   };
 
   const playerName = (p) => {
@@ -322,6 +418,7 @@ export default function GameScreen({
           isTurn={currentPlayer === P2}
           action={currentPlayer === P2 && !gs.winner ? (gs.phase === 'roll' ? 'Roll dice' : 'Move') : null}
           winner={gs.winner === P2}
+          pip={pip2}
         />
         {gs.winner && (
           <span style={{ color: theme.textHighlight, fontWeight: 'bold', fontSize: 16 }}>
@@ -336,6 +433,7 @@ export default function GameScreen({
           action={currentPlayer === P1 && !gs.winner ? (gs.phase === 'roll' ? 'Roll dice' : 'Move') : null}
           winner={gs.winner === P1}
           align="right"
+          pip={pip1}
         />
       </div>
 
@@ -354,29 +452,87 @@ export default function GameScreen({
           transform: `scale(${boardScale})`,
           transformOrigin: 'top center',
           marginBottom: boardScale < 1 ? -(1 - boardScale) * 420 : 0,
+          position: 'relative',
         }}>
           <Board
             gameState={gs}
             validMoves={validMoves}
+            movableSources={movableSources}
             selectedFrom={selectedFrom}
             onClickChecker={handleClickChecker}
             onClickPoint={handleClickPoint}
             onClickBar={handleClickBar}
             onClickOff={handleClickOff}
             currentPlayer={currentPlayer}
+            animatingFrom={animatingFrom}
+            animatingPlayer={animatingPlayer}
+            direction={direction}
           />
+          {passOverlay && (
+            <div style={{
+              position: 'absolute',
+              inset: 0,
+              background: 'rgba(0,0,0,0.6)',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 8,
+              borderRadius: 12,
+              pointerEvents: 'none',
+              zIndex: 10,
+            }}>
+              <Stone player={passOverlay} size={32} />
+              <div style={{
+                color: theme.textHighlight,
+                fontSize: 28,
+                fontWeight: 'bold',
+                textShadow: '0 2px 8px rgba(0,0,0,0.8)',
+              }}>
+                No valid moves — Pass!
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
+      {/* Flying checker animation overlay */}
+      {flyingChecker && (
+        <div
+          style={{
+            position: 'fixed',
+            left: flyingChecker.arrived ? flyingChecker.to.x - 18 : flyingChecker.from.x - 18,
+            top: flyingChecker.arrived ? flyingChecker.to.y - 18 : flyingChecker.from.y - 18,
+            zIndex: 9999,
+            transition: `left ${ANIMATION_DURATION}ms ease-in-out, top ${ANIMATION_DURATION}ms ease-in-out`,
+            pointerEvents: 'none',
+          }}
+        >
+          <Checker player={flyingChecker.player} />
+        </div>
+      )}
+
       {/* Dice + controls */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginTop: 16 }}>
-        {gs.dice.length > 0 && gs.dice.map((d, i) => (
-          <DiceFace
-            key={i}
-            value={d}
-            used={!gs.moves.includes(d) || gs.moves.indexOf(d) > gs.moves.lastIndexOf(d) - i}
-          />
-        ))}
+        {gs.dice.length > 0 && gs.dice.map((d, i) => {
+          // Count how many of this die value have been used
+          const totalOfValue = gs.dice.filter(v => v === d).length;
+          const remainingOfValue = gs.moves.filter(v => v === d).length;
+          const usedOfValue = totalOfValue - remainingOfValue;
+          // This specific die index is used if enough of its value are consumed
+          const sameValueBefore = gs.dice.slice(0, i).filter(v => v === d).length;
+          const used = sameValueBefore < usedOfValue;
+          const canClick = !used && myTurn && gs.phase === 'move' && !(isAI && currentPlayer === P2);
+          return (
+            <DiceFace
+              key={i}
+              value={d}
+              used={used}
+              selected={!used && selectedDie === d}
+              onClick={canClick ? () => { setSelectedDie(d); setSelectedFrom(null); } : undefined}
+            />
+          );
+        })}
 
         {gs.phase === 'roll' && !gs.winner && myTurn && !(isAI && currentPlayer === P2) && (
           <button onClick={handleRoll} style={btnStyle}>

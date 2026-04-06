@@ -30,14 +30,19 @@ The board and screens are functional but visually basic. This phase brings them 
 - [x] **Responsive layout** - Board scales down on narrow viewports, status bar is fluid
 - [x] **Casino theme** - Old-style casino look: black/white, red buttons, gold accents, centralized in `theme.js`
 - [x] **Landing title** - "Lumpzammon!" with exclamation mark on MenuScreen
+- [x] **Alternating board direction** - Full 180° board rotation on each new game (top/bottom + left/right swap). In online mode each player sees their home on the bottom half
+- [x] **Pip count** - Each player's total pip distance shown next to their name in the status bar
+- [x] **Pass overlay** - Prominent centered overlay with player stone when no valid moves, replacing small text message
+- [x] **Move hints** - Movable checkers glow gold, destination points highlighted after selection
+- [x] **Dice selection** - Click dice to choose play order; first die auto-selected after rolling, remaining die auto-selected after move
 - [ ] **Board aesthetics** - Wood textures, shadows, rounded triangles, point numbering
-- [ ] **Checker animations** - Smooth CSS transitions for moves, bar hits, bearing off
+- [x] **Checker animations** - Smooth CSS transitions for moves, bar hits, bearing off
 - [ ] **Dice roll animation** - Tumble/spin before revealing values
 - [ ] **Sound effects** - Dice roll, checker place, hit, bear off, win
 - [x] **Turn indicator** - Player names with stone icons, (you!) tag, action label next to active player
 - [ ] **Move history sidebar** - Scrollable log of moves in standard notation
 - [ ] **Undo button** - Allow undoing partial moves within a turn (before ending turn)
-- [x] **User-based theme customization** - Nickname-driven themes: "jugo" gets sepia, "pepo" gets marine colors (via ThemeContext)
+- [x] **User-based theme customization** - Nickname-driven themes: "jugo" gets sepia, "pepo" gets marine, "simon" gets rainbow with floating stars/flowers (via ThemeContext)
 - [ ] **Dark/light theme** - Toggle between wood tones
 
 ---
@@ -118,6 +123,12 @@ The current AI is a single-step greedy evaluator. It works but is beatable.
 - [ ] **PWA support** - Offline capability, installable as app
 - [ ] **Internationalization** - Multi-language support
 - [ ] **Accessibility** - Keyboard navigation, screen reader support, ARIA labels
+
+---
+
+## Bug Fixes
+
+- [x] **Fix duplicated checkers on bar (PR #9)** — Hit checkers appeared twice on the bar because `BarZone` was rendered in both board halves showing all players. Added `player` prop to `BarZone` so each half only shows the relevant player's checkers. Also restored `Board.jsx` to a valid component (PR had accidentally stripped the module wrapper).
 
 ---
 

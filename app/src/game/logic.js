@@ -4,6 +4,16 @@ export const P2 = 2;
 export const TOP_IDX = [12,13,14,15,16,17,null,18,19,20,21,22,23];
 export const BOT_IDX = [11,10,9,8,7,6,null,5,4,3,2,1,0];
 
+// 180° rotation: old bottom reversed becomes new top, old top reversed becomes new bottom
+const TOP_IDX_FLIP = [0,1,2,3,4,5,null,6,7,8,9,10,11];
+const BOT_IDX_FLIP = [23,22,21,20,19,18,null,17,16,15,14,13,12];
+
+export function getBoardIndices(dir) {
+  return dir === 1
+    ? { topIdx: TOP_IDX_FLIP, botIdx: BOT_IDX_FLIP }
+    : { topIdx: TOP_IDX, botIdx: BOT_IDX };
+}
+
 export function initialBoard() {
   const p = Array.from({ length: 24 }, () => ({ n: 0, p: 0 }));
   p[23] = { n: 2, p: 1 }; p[12] = { n: 5, p: 1 };
@@ -49,6 +59,16 @@ export function allHome(s, pl) {
 
 export function pipDist(i, pl) {
   return pl === 1 ? i + 1 : 24 - i;
+}
+
+export function calcPipCount(s, pl) {
+  let total = 0;
+  for (let i = 0; i < 24; i++) {
+    if (s.pts[i].p === pl && s.pts[i].n > 0)
+      total += pipDist(i, pl) * s.pts[i].n;
+  }
+  total += s.bar[pl] * 25;
+  return total;
 }
 
 export function farthestHome(s, pl) {

@@ -54,6 +54,7 @@ lumpzammon/
         │   ├── Checker.jsx        # Game piece (white/black)
         │   ├── DiceFace.jsx       # Die face with dot layout
         │   ├── BarZone.jsx        # Captured pieces area
+        │   ├── RainbowDecorations.jsx # Animated stars/flowers overlay for rainbow theme
         │   ├── AdminPanel.jsx     # Match + lobby management overlay
         │   └── BuildInfo.jsx      # Deploy info (commit, author, date)
         ├── screens/               # Full-page views
@@ -126,6 +127,17 @@ All game rules live in `src/game/logic.js` as pure functions with no dependencie
 - Plays all available dice sequentially
 - Moves are applied one at a time with 750ms delays between each, so the player can follow each individual stone movement. The AI auto-rolls after 800ms.
 
+### Move Animation
+
+When a piece moves (player or AI), instead of teleporting, a **flying checker** smoothly translates from the source to the destination using CSS transitions (300ms ease-in-out). The system works by:
+
+1. Computing screen coordinates of source and destination elements via `data-point-id` / `data-bar-player` DOM attributes and `getBoundingClientRect()`
+2. Hiding the top checker at the source point (opacity: 0)
+3. Rendering a `position: fixed` Checker overlay that transitions from source to destination coordinates
+4. After the animation completes, removing the overlay and applying the actual game state update
+
+This applies to all move types: point-to-point, bar-to-point, and point-to-off, for both human and AI players. An `isAnimatingRef` prevents input during animation.
+
 ### Game Modes
 
 | Mode    | How it works                                                    |
@@ -145,8 +157,11 @@ Three theme variants are available:
 | Default | Any other name    | Casino — black, white, red, gold           |
 | Sepia   | Nickname "jugo"   | Warm browns, tans, parchment tones         |
 | Marine  | Nickname "pepo"   | Deep blues, teals, ocean tones             |
+| Rainbow | Nickname "simon"  | Vibrant rainbow colors, floating stars & flowers, gradient text |
 
 The theme is selected automatically based on the player's nickname (case-insensitive, exact match). The `getTheme(nick)` function in `theme.js` handles the mapping. All components consume the theme via the `useTheme()` hook from `ThemeContext.jsx`.
+
+The Rainbow theme includes a special `decorations` property that triggers the `RainbowDecorations` component (`src/components/RainbowDecorations.jsx`), which renders animated floating stars (✦⭐), flowers (✿❀), and rainbows (🌈) as a fixed overlay. The title text also gets a rainbow gradient effect.
 
 ### Status Bar
 
@@ -193,6 +208,34 @@ Live URL: https://jpep.github.io/lumpzammon/
   - **Local dev**: set values in `app/.env` (gitignored, see `app/.env.example` for template)
   - **GitHub Pages**: injected via repository secrets during the Actions build step
   - Firebase project: `lumpzammon` (Spark/free plan, Realtime Database)
+
+## Alternating Board Direction
+
+The board direction alternates each new game, like flipping seats at a real backgammon table. A `direction` state (0 or 1) in `GameScreen.jsx` toggles on "New Game". `getBoardIndices(dir)` in `logic.js` returns flipped index arrays, and `Board.jsx` conditionally places bear-off zones on the left or right side accordingly. Game logic is unchanged — only the visual mapping of indices to screen positions changes. The flip is a full 180° rotation: top/bottom halves swap, left/right swap, and each player's bar and bear-off zone move to the correct half. Bear-off zones display a "home" label highlighted for the current player. In online mode, direction is derived from `playerSlot` — each player sees their own home on the bottom half of the screen, like sitting across a real table.
+
+## Pip Count
+
+Each player's pip count (total distance remaining to bear off all checkers) is displayed next to their name in the status bar. Calculated by `calcPipCount(s, pl)` in `logic.js` — sums `pipDist * checkerCount` for all board points plus `bar[pl] * 25` for bar checkers.
+
+## Pass Overlay
+
+When a player rolls and has no valid moves, a prominent overlay appears centered on the board with a semi-transparent backdrop, the player's stone icon, and bold "No valid moves — Pass!" text. The overlay auto-clears after 2 seconds. Replaces the previous small text message.
+
+## Move Hints and Dice Selection
+
+When it's a player's turn to move:
+
+- **Movable checkers** are highlighted with a gold glow, showing which pieces can legally move with the currently selected die.
+- **Destination highlights** appear after selecting a checker, showing valid landing points.
+- **Dice selection** — after rolling, the first die is auto-selected (gold border glow). Click the other die to switch which die value you're playing first. Moves are filtered to only show options for the selected die. After playing a die, the remaining one auto-selects.
+
+Components involved: `GameScreen.jsx` (state management), `DiceFace.jsx` (selected glow), `Checker.jsx` (movable glow), `Point.jsx` / `BarZone.jsx` (pass movable state), `Board.jsx` (movableSources set).
+
+## Bug Fixes
+
+### Fix duplicated checkers on the bar (2026-04-06)
+
+PR #9 identified a bug where hit checkers appeared duplicated on the bar — `Board` rendered `<BarZone>` twice (once per half) and each instance rendered both players. The fix passes a `player` prop to `BarZone` (`player={2}` in the top half, `player={1}` in the bottom half) so each instance only renders one player's hit checkers. PR #9's Board.jsx was also restored to a valid component (it had been accidentally reduced to a JSX fragment).
 
 ## Origin
 

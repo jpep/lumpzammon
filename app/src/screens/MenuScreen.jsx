@@ -41,8 +41,27 @@ export default function MenuScreen({ onStart }) {
 
   return (
     <div style={containerStyle}>
-      <h1 style={{ color: theme.text, fontSize: 36, marginBottom: 4, letterSpacing: 2 }}>Lumpzammon!</h1>
-      <div style={{ width: 120, height: 2, background: theme.gold, marginBottom: 24 }} />
+      <h1 style={{
+        fontSize: 36,
+        marginBottom: 4,
+        letterSpacing: 2,
+        ...(theme.decorations === 'rainbow'
+          ? {
+              background: 'linear-gradient(90deg, #ff0000, #ff8800, #ffdd00, #00cc44, #0088ff, #aa44ff, #ff44aa)',
+              WebkitBackgroundClip: 'text',
+              WebkitTextFillColor: 'transparent',
+              animation: 'rainbow-title-glow 4s linear infinite',
+            }
+          : { color: theme.text }),
+      }}>Lumpzammon!</h1>
+      <div style={{
+        width: 120,
+        height: 2,
+        background: theme.decorations === 'rainbow'
+          ? 'linear-gradient(90deg, #ff0000, #ff8800, #ffdd00, #00cc44, #0088ff, #aa44ff)'
+          : theme.gold,
+        marginBottom: 24,
+      }} />
       <input
         type="text"
         placeholder="Enter your nickname"
