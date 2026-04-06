@@ -30,6 +30,7 @@ The board and screens are functional but visually basic. This phase brings them 
 - [x] **Responsive layout** - Board scales down on narrow viewports, status bar is fluid
 - [x] **Casino theme** - Old-style casino look: black/white, red buttons, gold accents, centralized in `theme.js`
 - [x] **Landing title** - "Lumpzammon!" with exclamation mark on MenuScreen
+- [x] **Alternating board direction** - Bear-off zones swap sides and board indices reverse on each new game, like flipping seats at a real table
 - [x] **Pip count** - Each player's total pip distance shown next to their name in the status bar
 - [x] **Pass overlay** - Prominent centered overlay with player stone when no valid moves, replacing small text message
 - [x] **Move hints** - Movable checkers glow gold, destination points highlighted after selection

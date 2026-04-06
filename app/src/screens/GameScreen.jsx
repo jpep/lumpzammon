@@ -95,6 +95,7 @@ export default function GameScreen({
   const isAI = mode === 'ai';
 
   const [localState, setLocalState] = useState(() => newGameState());
+  const [direction, setDirection] = useState(0);
   const rawGs = isOnline ? (matchData?.state || localState) : localState;
   const gs = {
     ...rawGs,
@@ -354,6 +355,7 @@ export default function GameScreen({
     setSelectedFrom(null);
     setSelectedDie(null);
     setMessage('');
+    setDirection(d => d === 0 ? 1 : 0);
   };
 
   const playerName = (p) => {
@@ -463,6 +465,7 @@ export default function GameScreen({
             currentPlayer={currentPlayer}
             animatingFrom={animatingFrom}
             animatingPlayer={animatingPlayer}
+            direction={direction}
           />
           {passOverlay && (
             <div style={{
