@@ -190,6 +190,10 @@ Live URL: https://jpep.github.io/lumpzammon/
   - **GitHub Pages**: injected via repository secrets during the Actions build step
   - Firebase project: `lumpzammon` (Spark/free plan, Realtime Database)
 
+## Pass Overlay
+
+When a player rolls and has no valid moves, a prominent overlay appears centered on the board with a semi-transparent backdrop, the player's stone icon, and bold "No valid moves — Pass!" text. The overlay auto-clears after 2 seconds. Replaces the previous small text message.
+
 ## Move Hints and Dice Selection
 
 When it's a player's turn to move:

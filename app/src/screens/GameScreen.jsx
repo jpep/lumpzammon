@@ -100,6 +100,7 @@ export default function GameScreen({
   const [selectedFrom, setSelectedFrom] = useState(null);
   const [selectedDie, setSelectedDie] = useState(null);
   const [message, setMessage] = useState('');
+  const [passOverlay, setPassOverlay] = useState(null);
   const BOARD_WIDTH = 620;
   const calcScale = () => {
     const vw = (window.visualViewport?.width || window.innerWidth) - 32;
@@ -209,8 +210,8 @@ export default function GameScreen({
       newGs.dice = [];
       newGs.moves = [];
       setSelectedDie(null);
-      setMessage(`No valid moves! Turn passes.`);
-      setTimeout(() => setMessage(''), 2000);
+      setPassOverlay(currentPlayer);
+      setTimeout(() => setPassOverlay(null), 2000);
     } else {
       setSelectedDie(dice[0]);
     }
@@ -231,8 +232,8 @@ export default function GameScreen({
         newGs.turn = P1;
         newGs.dice = [];
         newGs.moves = [];
-        setMessage('No valid moves! Turn passes.');
-        setTimeout(() => setMessage(''), 2000);
+        setPassOverlay(P2);
+        setTimeout(() => setPassOverlay(null), 2000);
         updateState(newGs);
         return;
       }
@@ -437,6 +438,7 @@ export default function GameScreen({
           transform: `scale(${boardScale})`,
           transformOrigin: 'top center',
           marginBottom: boardScale < 1 ? -(1 - boardScale) * 420 : 0,
+          position: 'relative',
         }}>
           <Board
             gameState={gs}
@@ -451,6 +453,31 @@ export default function GameScreen({
             animatingFrom={animatingFrom}
             animatingPlayer={animatingPlayer}
           />
+          {passOverlay && (
+            <div style={{
+              position: 'absolute',
+              inset: 0,
+              background: 'rgba(0,0,0,0.6)',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 8,
+              borderRadius: 12,
+              pointerEvents: 'none',
+              zIndex: 10,
+            }}>
+              <Stone player={passOverlay} size={32} />
+              <div style={{
+                color: theme.textHighlight,
+                fontSize: 28,
+                fontWeight: 'bold',
+                textShadow: '0 2px 8px rgba(0,0,0,0.8)',
+              }}>
+                No valid moves — Pass!
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
