@@ -190,6 +190,16 @@ Live URL: https://jpep.github.io/lumpzammon/
   - **GitHub Pages**: injected via repository secrets during the Actions build step
   - Firebase project: `lumpzammon` (Spark/free plan, Realtime Database)
 
+## Move Hints and Dice Selection
+
+When it's a player's turn to move:
+
+- **Movable checkers** are highlighted with a gold glow, showing which pieces can legally move with the currently selected die.
+- **Destination highlights** appear after selecting a checker, showing valid landing points.
+- **Dice selection** — after rolling, the first die is auto-selected (gold border glow). Click the other die to switch which die value you're playing first. Moves are filtered to only show options for the selected die. After playing a die, the remaining one auto-selects.
+
+Components involved: `GameScreen.jsx` (state management), `DiceFace.jsx` (selected glow), `Checker.jsx` (movable glow), `Point.jsx` / `BarZone.jsx` (pass movable state), `Board.jsx` (movableSources set).
+
 ## Bug Fixes
 
 ### Fix duplicated checkers on the bar (2026-04-06)

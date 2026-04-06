@@ -30,6 +30,8 @@ The board and screens are functional but visually basic. This phase brings them 
 - [x] **Responsive layout** - Board scales down on narrow viewports, status bar is fluid
 - [x] **Casino theme** - Old-style casino look: black/white, red buttons, gold accents, centralized in `theme.js`
 - [x] **Landing title** - "Lumpzammon!" with exclamation mark on MenuScreen
+- [x] **Move hints** - Movable checkers glow gold, destination points highlighted after selection
+- [x] **Dice selection** - Click dice to choose play order; first die auto-selected after rolling, remaining die auto-selected after move
 - [ ] **Board aesthetics** - Wood textures, shadows, rounded triangles, point numbering
 - [x] **Checker animations** - Smooth CSS transitions for moves, bar hits, bearing off
 - [ ] **Dice roll animation** - Tumble/spin before revealing values

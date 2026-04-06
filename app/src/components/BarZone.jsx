@@ -2,7 +2,7 @@ import React from 'react';
 import Checker from './Checker';
 import { useTheme } from '../ThemeContext';
 
-export default function BarZone({ bar, player, onClickBar, selectedFrom, animatingFrom, animatingPlayer }) {
+export default function BarZone({ bar, player, isMovable, onClickBar, selectedFrom, animatingFrom, animatingPlayer }) {
   const theme = useTheme();
 
   return (
@@ -21,6 +21,7 @@ export default function BarZone({ bar, player, onClickBar, selectedFrom, animati
             key={`b${player}-${i}`}
             player={player}
             selected={selectedFrom === 'bar' && i === bar[player] - 1}
+            movable={isMovable && i === bar[player] - 1 && selectedFrom !== 'bar'}
             onClick={i === bar[player] - 1 && onClickBar ? () => onClickBar(player) : undefined}
             style={{
               opacity: i === bar[player] - 1 && animatingFrom === 'bar' && animatingPlayer === player ? 0 : 1,

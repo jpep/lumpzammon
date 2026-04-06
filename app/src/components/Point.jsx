@@ -8,6 +8,7 @@ export default function Point({
   isTop,
   isHighlighted,
   isSelected,
+  isMovable,
   onClickPoint,
   onClickChecker,
   selectedFrom,
@@ -27,6 +28,7 @@ export default function Point({
         key={i}
         player={p}
         selected={isSelected && isTopChecker}
+        movable={isMovable && isTopChecker && !isSelected}
         onClick={isTopChecker && onClickChecker ? () => onClickChecker(index) : undefined}
         style={{
           marginBottom: isTop ? 2 : 0,

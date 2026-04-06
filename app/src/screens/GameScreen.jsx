@@ -98,6 +98,7 @@ export default function GameScreen({
   };
 
   const [selectedFrom, setSelectedFrom] = useState(null);
+  const [selectedDie, setSelectedDie] = useState(null);
   const [message, setMessage] = useState('');
   const BOARD_WIDTH = 620;
   const calcScale = () => {
@@ -126,7 +127,11 @@ export default function GameScreen({
 
   const currentPlayer = gs.turn || P1;
   const myTurn = isOnline ? (playerSlot === currentPlayer) : true;
-  const validMoves = gs.phase === 'move' ? getValidMoves(gs, currentPlayer) : [];
+  const allValidMoves = gs.phase === 'move' ? getValidMoves(gs, currentPlayer) : [];
+  const validMoves = selectedDie != null
+    ? allValidMoves.filter(m => m.d === selectedDie)
+    : allValidMoves;
+  const movableSources = new Set(validMoves.map(m => m.f));
 
   const updateState = useCallback((newState) => {
     if (isOnline) {
@@ -203,8 +208,11 @@ export default function GameScreen({
       newGs.turn = newGs.turn === P1 ? P2 : P1;
       newGs.dice = [];
       newGs.moves = [];
+      setSelectedDie(null);
       setMessage(`No valid moves! Turn passes.`);
       setTimeout(() => setMessage(''), 2000);
+    } else {
+      setSelectedDie(dice[0]);
     }
 
     updateState(newGs);
@@ -319,6 +327,9 @@ export default function GameScreen({
         newGs.turn = currentPlayer === P1 ? P2 : P1;
         newGs.dice = [];
         newGs.moves = [];
+        setSelectedDie(null);
+      } else {
+        setSelectedDie(newGs.moves[0]);
       }
 
       updateState(newGs);
@@ -331,6 +342,7 @@ export default function GameScreen({
     const fresh = newGameState();
     updateState(fresh);
     setSelectedFrom(null);
+    setSelectedDie(null);
     setMessage('');
   };
 
@@ -429,6 +441,7 @@ export default function GameScreen({
           <Board
             gameState={gs}
             validMoves={validMoves}
+            movableSources={movableSources}
             selectedFrom={selectedFrom}
             onClickChecker={handleClickChecker}
             onClickPoint={handleClickPoint}
@@ -459,13 +472,25 @@ export default function GameScreen({
 
       {/* Dice + controls */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginTop: 16 }}>
-        {gs.dice.length > 0 && gs.dice.map((d, i) => (
-          <DiceFace
-            key={i}
-            value={d}
-            used={!gs.moves.includes(d) || gs.moves.indexOf(d) > gs.moves.lastIndexOf(d) - i}
-          />
-        ))}
+        {gs.dice.length > 0 && gs.dice.map((d, i) => {
+          // Count how many of this die value have been used
+          const totalOfValue = gs.dice.filter(v => v === d).length;
+          const remainingOfValue = gs.moves.filter(v => v === d).length;
+          const usedOfValue = totalOfValue - remainingOfValue;
+          // This specific die index is used if enough of its value are consumed
+          const sameValueBefore = gs.dice.slice(0, i).filter(v => v === d).length;
+          const used = sameValueBefore < usedOfValue;
+          const canClick = !used && myTurn && gs.phase === 'move' && !(isAI && currentPlayer === P2);
+          return (
+            <DiceFace
+              key={i}
+              value={d}
+              used={used}
+              selected={!used && selectedDie === d}
+              onClick={canClick ? () => { setSelectedDie(d); setSelectedFrom(null); } : undefined}
+            />
+          );
+        })}
 
         {gs.phase === 'roll' && !gs.winner && myTurn && !(isAI && currentPlayer === P2) && (
           <button onClick={handleRoll} style={btnStyle}>

@@ -7,6 +7,7 @@ import { useTheme } from '../ThemeContext';
 export default function Board({
   gameState,
   validMoves,
+  movableSources,
   selectedFrom,
   onClickChecker,
   onClickPoint,
@@ -41,6 +42,7 @@ export default function Board({
             isTop={isTop}
             isHighlighted={highlightedTargets.has(idx)}
             isSelected={selectedFrom === idx}
+            isMovable={movableSources.has(idx)}
             onClickPoint={highlightedTargets.has(idx) ? onClickPoint : undefined}
             onClickChecker={onClickChecker}
             selectedFrom={selectedFrom}
@@ -69,7 +71,7 @@ export default function Board({
         <div style={{ display: 'flex' }}>
           {renderHalf(TOP_IDX.slice(0, 6), true)}
         </div>
-        <BarZone bar={bar} player={2} onClickBar={onClickBar} selectedFrom={selectedFrom} animatingFrom={animatingFrom} animatingPlayer={animatingPlayer} />
+        <BarZone bar={bar} player={2} isMovable={movableSources.has('bar')} onClickBar={onClickBar} selectedFrom={selectedFrom} animatingFrom={animatingFrom} animatingPlayer={animatingPlayer} />
         <div style={{ display: 'flex' }}>
           {renderHalf(TOP_IDX.slice(7), true)}
         </div>
@@ -101,7 +103,7 @@ export default function Board({
         <div style={{ display: 'flex' }}>
           {renderHalf(BOT_IDX.slice(0, 6), false)}
         </div>
-        <BarZone bar={bar} player={1} onClickBar={onClickBar} selectedFrom={selectedFrom} animatingFrom={animatingFrom} animatingPlayer={animatingPlayer} />
+        <BarZone bar={bar} player={1} isMovable={movableSources.has('bar')} onClickBar={onClickBar} selectedFrom={selectedFrom} animatingFrom={animatingFrom} animatingPlayer={animatingPlayer} />
         <div style={{ display: 'flex' }}>
           {renderHalf(BOT_IDX.slice(7), false)}
         </div>
