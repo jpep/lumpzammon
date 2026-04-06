@@ -51,6 +51,16 @@ export function pipDist(i, pl) {
   return pl === 1 ? i + 1 : 24 - i;
 }
 
+export function calcPipCount(s, pl) {
+  let total = 0;
+  for (let i = 0; i < 24; i++) {
+    if (s.pts[i].p === pl && s.pts[i].n > 0)
+      total += pipDist(i, pl) * s.pts[i].n;
+  }
+  total += s.bar[pl] * 25;
+  return total;
+}
+
 export function farthestHome(s, pl) {
   const [lo, hi] = pl === 1 ? [0, 5] : [18, 23];
   if (pl === 1) {

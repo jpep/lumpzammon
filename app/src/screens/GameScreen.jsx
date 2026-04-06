@@ -4,7 +4,7 @@ import Checker from '../components/Checker';
 import DiceFace from '../components/DiceFace';
 import { useTheme } from '../ThemeContext';
 import {
-  newGameState, rollDice, getValidMoves, applyMove, checkWin, clone, P1, P2
+  newGameState, rollDice, getValidMoves, applyMove, checkWin, clone, calcPipCount, P1, P2
 } from '../game/logic';
 import { aiPlay } from '../game/ai';
 
@@ -26,7 +26,7 @@ function Stone({ player, size = 16 }) {
   );
 }
 
-function PlayerTag({ name, player, isYou, isTurn, action, winner, align }) {
+function PlayerTag({ name, player, isYou, isTurn, action, winner, align, pip }) {
   const theme = useTheme();
   const isRight = align === 'right';
   const actionStyle = {
@@ -40,11 +40,16 @@ function PlayerTag({ name, player, isYou, isTurn, action, winner, align }) {
     fontWeight: isTurn ? 'bold' : 'normal',
     fontSize: 15,
   };
+  const pipStyle = {
+    color: theme.textSecondary,
+    fontSize: 11,
+  };
   const youTag = isYou && (
     <span style={{ color: theme.textYou, fontSize: 12, fontWeight: 'bold' }}>(you!)</span>
   );
   const sep = action && <span style={actionStyle}>—</span>;
   const act = action && <span style={actionStyle}>{action}</span>;
+  const pipTag = pip != null && <span style={pipStyle}>pip {pip}</span>;
 
   return (
     <div style={{
@@ -57,6 +62,7 @@ function PlayerTag({ name, player, isYou, isTurn, action, winner, align }) {
       {isRight && <>{act}{sep}</>}
       {isRight ? (
         <>
+          {pipTag}
           <span style={nameStyle}>{name}</span>
           {youTag}
           <Stone player={player} />
@@ -66,6 +72,7 @@ function PlayerTag({ name, player, isYou, isTurn, action, winner, align }) {
           <Stone player={player} />
           <span style={nameStyle}>{name}</span>
           {youTag}
+          {pipTag}
         </>
       )}
       {!isRight && <>{sep}{act}</>}
@@ -133,6 +140,8 @@ export default function GameScreen({
     ? allValidMoves.filter(m => m.d === selectedDie)
     : allValidMoves;
   const movableSources = new Set(validMoves.map(m => m.f));
+  const pip1 = calcPipCount(gs, P1);
+  const pip2 = calcPipCount(gs, P2);
 
   const updateState = useCallback((newState) => {
     if (isOnline) {
@@ -406,6 +415,7 @@ export default function GameScreen({
           isTurn={currentPlayer === P2}
           action={currentPlayer === P2 && !gs.winner ? (gs.phase === 'roll' ? 'Roll dice' : 'Move') : null}
           winner={gs.winner === P2}
+          pip={pip2}
         />
         {gs.winner && (
           <span style={{ color: theme.textHighlight, fontWeight: 'bold', fontSize: 16 }}>
@@ -420,6 +430,7 @@ export default function GameScreen({
           action={currentPlayer === P1 && !gs.winner ? (gs.phase === 'roll' ? 'Roll dice' : 'Move') : null}
           winner={gs.winner === P1}
           align="right"
+          pip={pip1}
         />
       </div>
 

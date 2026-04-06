@@ -190,6 +190,10 @@ Live URL: https://jpep.github.io/lumpzammon/
   - **GitHub Pages**: injected via repository secrets during the Actions build step
   - Firebase project: `lumpzammon` (Spark/free plan, Realtime Database)
 
+## Pip Count
+
+Each player's pip count (total distance remaining to bear off all checkers) is displayed next to their name in the status bar. Calculated by `calcPipCount(s, pl)` in `logic.js` — sums `pipDist * checkerCount` for all board points plus `bar[pl] * 25` for bar checkers.
+
 ## Pass Overlay
 
 When a player rolls and has no valid moves, a prominent overlay appears centered on the board with a semi-transparent backdrop, the player's stone icon, and bold "No valid moves — Pass!" text. The overlay auto-clears after 2 seconds. Replaces the previous small text message.
