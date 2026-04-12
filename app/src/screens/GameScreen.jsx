@@ -539,9 +539,9 @@ export default function GameScreen({
         />
       </div>
 
-      {message && (
-        <div style={{ color: theme.textHighlight, fontSize: 14, marginBottom: 8 }}>{message}</div>
-      )}
+      <div style={{ color: theme.textHighlight, fontSize: 14, marginBottom: 8, minHeight: 20, visibility: message ? 'visible' : 'hidden' }}>
+        {message || '\u00A0'}
+      </div>
 
       {/* Board — scales to fit viewport */}
       <div style={{
@@ -614,8 +614,8 @@ export default function GameScreen({
         </div>
       )}
 
-      {/* Dice + controls */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginTop: 16, flexWrap: 'wrap', justifyContent: 'center' }}>
+      {/* Dice + controls — fixed height to prevent board from shifting */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginTop: 16, flexWrap: 'wrap', justifyContent: 'center', minHeight: 52 }}>
         {gs.phase === 'opening' && (
           <>
             {gs.openingRolls[P1] > 0 && (
