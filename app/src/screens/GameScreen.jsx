@@ -134,7 +134,7 @@ export default function GameScreen({
 
   // Persist local/AI game state across page reloads
   useEffect(() => {
-    if (!isOnline) saveLocalGame(mode, localState, localDirection);
+    if (!isOnline && localState.phase !== 'pass') saveLocalGame(mode, localState, localDirection);
   }, [isOnline, mode, localState, localDirection]);
 
   // Animation state
@@ -295,18 +295,25 @@ export default function GameScreen({
 
     const vm = getValidMoves(newGs, newGs.turn);
     if (vm.length === 0) {
-      newGs.phase = 'roll';
-      newGs.turn = newGs.turn === P1 ? P2 : P1;
-      newGs.dice = [];
-      newGs.moves = [];
+      // Show the dice and pass overlay before transitioning.
+      // Use phase='pass' so neither AI turn nor AI auto-roll effects fire.
+      newGs.phase = 'pass';
       setSelectedDie(null);
       setPassOverlay(currentPlayer);
+      updateState(newGs);
+      setTimeout(() => {
+        const passGs = clone(newGs);
+        passGs.phase = 'roll';
+        passGs.turn = passGs.turn === P1 ? P2 : P1;
+        passGs.dice = [];
+        passGs.moves = [];
+        updateState(passGs);
+      }, 1500);
       setTimeout(() => setPassOverlay(null), 2000);
     } else {
       setSelectedDie(dice[0]);
+      updateState(newGs);
     }
-
-    updateState(newGs);
   }, [gs, currentPlayer, myTurn, isOnline, updateState]);
 
   // AI turn — apply one move at a time with animation
