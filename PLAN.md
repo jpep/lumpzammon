@@ -95,6 +95,7 @@ The current AI is a single-step greedy evaluator. It works but is beatable.
 - [ ] **Match timeout/cleanup** - Auto-delete stale matches older than 1 hour
 - [x] **Reconnection** - Detect disconnect and allow rejoining an in-progress match (localStorage saves nick + matchId + playerSlot; on load, auto-reconnects to Firebase match if still alive)
 - [x] **Local/AI game persistence** - Game state and board direction saved to localStorage on every change; restored on page load if game is still in progress
+- [x] **Multi-tab isolation** - Session and game storage scoped by nickname; nick stored in sessionStorage (per-tab) so two tabs with different nicks can test online mode without clashing
 - [ ] **Spectator mode** - Read-only view for third-party observers
 - [ ] **Chat** - Simple in-game messaging between opponents
 - [ ] **Rate limiting** - Prevent spam/abuse of match creation

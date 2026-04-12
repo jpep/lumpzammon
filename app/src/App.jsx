@@ -11,7 +11,7 @@ import useKickDetection from './hooks/useKickDetection';
 import RainbowDecorations from './components/RainbowDecorations';
 import { getTheme } from './theme';
 import { ThemeProvider } from './ThemeContext';
-import { loadNick, saveNick, clearNick, loadSession, clearSession, loadLocalGame } from './storage/local';
+import { loadNick, saveNick, clearNick, loadSession, clearSession, loadLocalGame, setCurrentNick } from './storage/local';
 
 export default function App() {
   const [screen, setScreen] = useState('menu');
@@ -32,6 +32,7 @@ export default function App() {
 
     const savedNick = loadNick();
     if (!savedNick) return;
+    setCurrentNick(savedNick);
 
     const session = loadSession();
     if (session) {
@@ -70,6 +71,7 @@ export default function App() {
   const handleStart = (nickname) => {
     setNick(nickname);
     saveNick(nickname);
+    setCurrentNick(nickname);
     setScreen('modeSelect');
   };
 
@@ -103,6 +105,7 @@ export default function App() {
     setMode(null);
     setNick('');
     clearNick();
+    reconnectAttempted.current = false;
     setScreen('menu');
   };
 

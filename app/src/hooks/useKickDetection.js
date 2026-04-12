@@ -5,6 +5,11 @@ export default function useKickDetection(matchId, playerSlot) {
   const [kicked, setKicked] = useState(false);
   const intervalRef = useRef(null);
 
+  // Reset when match changes (e.g. after leaving a match)
+  useEffect(() => {
+    setKicked(false);
+  }, [matchId]);
+
   useEffect(() => {
     if (!matchId || !playerSlot) return;
 

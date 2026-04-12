@@ -435,6 +435,11 @@ export default function GameScreen({
     setSelectedFrom(null);
     setSelectedDie(null);
     setMessage('');
+    setPassOverlay(null);
+    setFlyingChecker(null);
+    setAnimatingFrom(null);
+    setAnimatingPlayer(null);
+    isAnimatingRef.current = false;
     setLocalDirection(d => d === 0 ? 1 : 0);
   };
 

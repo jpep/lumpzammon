@@ -92,12 +92,12 @@ Detection is automatic. The `sSubscribe` function uses Firebase's `onValue` for 
 
 ### Game Persistence & Reconnection
 
-All game modes persist across browser reloads. Online matches use Firebase + localStorage session. Local and AI games save state and board direction to `localStorage` on every change, and restore on page load (skipped if the game was already won). Clicking "Leave Game" clears the saved state. The local storage layer (`src/storage/local.js`) saves the player's nickname and active match session (matchId + playerSlot) to `localStorage`.
+All game modes persist across browser reloads. Online matches use Firebase + localStorage session. Local and AI games save state and board direction to `localStorage` on every change, and restore on page load (skipped if the game was already won). Clicking "Leave Game" clears the saved state. The local storage layer (`src/storage/local.js`) saves the player's nickname and active match session (matchId + playerSlot). Session and local game keys are scoped by nickname (e.g. `bg:session:pepo`) so multiple tabs with different nicks can coexist without clashing — useful for testing online mode against yourself. The nickname itself is stored in `sessionStorage` (per-tab) with a `localStorage` fallback for pre-filling on fresh tabs.
 
 **How it works:**
 
-1. When a player creates or joins a match, the session is saved to `localStorage`
-2. The nickname is also saved, so the menu screen pre-fills it on return
+1. When a player creates or joins a match, the session is saved to `localStorage` (scoped by nick)
+2. The nickname is saved to both `sessionStorage` (per-tab isolation) and `localStorage` (pre-fill fallback)
 3. On app load, if a saved session exists, the app attempts to reconnect to the match in Firebase
 4. Reconnection verifies the match still exists and the player's nickname matches the stored slot
 5. If reconnection succeeds, the player goes straight to the game screen
