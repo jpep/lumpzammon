@@ -443,7 +443,7 @@ export default function GameScreen({
     setAnimatingFrom(null);
     setAnimatingPlayer(null);
     isAnimatingRef.current = false;
-    setLocalDirection(d => d === 0 ? 1 : 0);
+    if (!isAI) setLocalDirection(d => d === 0 ? 1 : 0);
   };
 
   const playerName = (p) => {
