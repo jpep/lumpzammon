@@ -160,7 +160,7 @@ function drawBoard() {
   strokeWeight(1.5);
   rect(bx, by, 13*a, 13*a);
 
-  const targets = drag.active ? getValidTargets(drag.fromPt, mockState.dice) : [];
+  const targets = drag.active ? getValidTargets(drag.fromPt) : [];
 
   for (let i = 0; i < 6; i++) {
     const dark = (i % 2 === 0);
@@ -313,9 +313,11 @@ function drawCheckers() {
     drawStackOnPoint(pt, abs(val), val > 0, skipTop);
   }
   const barCX = bx + 6.5*a;
-  for (let i = 0; i < mockState.bar.white; i++)
+  const skipWhiteBar = drag.active && drag.fromPt === 'bar' && mockState.turn === 'white';
+  const skipBlackBar = drag.active && drag.fromPt === 'bar' && mockState.turn === 'black';
+  for (let i = 0; i < mockState.bar.white - (skipWhiteBar ? 1 : 0); i++)
     drawChecker(barCX, by + 3*a - r - i*a, true, false);
-  for (let i = 0; i < mockState.bar.black; i++)
+  for (let i = 0; i < mockState.bar.black - (skipBlackBar ? 1 : 0); i++)
     drawChecker(barCX, by + 10*a + r + i*a, false, false);
 }
 
@@ -328,7 +330,7 @@ function drawStackOnPoint(pt, count, isWhite, skipTop) {
   const overflow = max(drawN - MAX_STACK, 0);
 
   // Est-ce que ce point est une cible valide ?
-  const targets = drag.active ? getValidTargets(drag.fromPt, mockState.dice) : [];
+  const targets = drag.active ? getValidTargets(drag.fromPt) : [];
   const isTarget = targets.includes(pt);
   const isSnapped = drag.snapPt === pt;
 
@@ -344,18 +346,12 @@ function drawStackOnPoint(pt, count, isWhite, skipTop) {
 }
 
 function drawChecker(cx, cy, isWhite, fiberOptic) {
-  fill(isWhite ? C.offwhite : C.ruby);
-  stroke(C.ivory);
-  strokeWeight(1.5);
+  fill(isWhite ? C.offwhite : C.ruby); noStroke();
   ellipse(cx, cy, 2*r, 2*r);
-
-  // Fibre optique supprimée des fiches : uniquement sur les triangles/colonnes.
 }
 
 function drawCheckerLabel(cx, cy, isWhite, label) {
-  fill(isWhite ? C.offwhite : C.ruby);
-  stroke(C.ivory);
-  strokeWeight(1.5);
+  fill(isWhite ? C.offwhite : C.ruby); noStroke();
   ellipse(cx, cy, 2*r, 2*r);
   noStroke();
   fill(isWhite ? C.numColor : C.ivory);
@@ -366,19 +362,24 @@ function drawCheckerLabel(cx, cy, isWhite, label) {
 
 // Pièce en cours de drag
 function drawDraggedChecker() {
-  const isWhite = mockState.points[drag.fromPt] > 0;
+  const isWhite = drag.fromPt === 'bar'
+    ? mockState.turn === 'white'
+    : mockState.points[drag.fromPt] > 0;
   noStroke();
   fill(0, 0, 0, 25);
   ellipse(drag.dispX + 2, drag.dispY + 3, 2*r + 8, 2*r + 8);
   fill(isWhite ? C.offwhite : C.ruby);
-  stroke(C.ivory);
-  strokeWeight(2);
+  noStroke();
   ellipse(drag.dispX, drag.dispY, 2*r, 2*r);
 }
 
 // ── Mouvements valides ────────────────────────────────────────────────────────
-// Retourne les destinations valides ; 0 = bearing off (sortie du plateau)
-function getValidTargets(fromPt, dice) {
+// Retourne les destinations valides ; 0 = bearing off
+function getValidTargets(fromPt) {
+  if (gameMode) return getRealTargets(fromPt);
+
+  // Mode mock (scénarios de test [1]-[4])
+  const dice    = mockState.dice;
   const targets = [];
 
   function addDest(dest) {
@@ -389,21 +390,18 @@ function getValidTargets(fromPt, dice) {
     }
   }
 
-  // Mouvements individuels
   for (const d of dice) addDest(fromPt - d);
 
-  // Somme des deux dés (si une case intermédiaire est accessible)
   if (dice.length === 2) {
     const sum  = dice[0] + dice[1];
     const mid0 = fromPt - dice[0];
     const mid1 = fromPt - dice[1];
     if (isPtAvailable(mid0) || isPtAvailable(mid1)) addDest(fromPt - sum);
   }
-
   return targets;
 }
 
-// Vérifie qu'un point n'est pas bloqué par l'adversaire (≥ 2 pièces ennemies)
+// Vérifie qu'un point n'est pas bloqué (mode mock uniquement)
 function isPtAvailable(pt) {
   if (pt < 1 || pt > 24) return false;
   const val  = mockState.points[pt] || 0;
@@ -419,6 +417,28 @@ function mousePressed() {
       startRoll(mockState.dice, mockState.turn);
     }
     return;
+  }
+  // Fiches sur la barre (priorité : must move bar pieces first)
+  const barCX = bx + 6.5*a;
+  if (mockState.turn === 'white' && mockState.bar.white > 0) {
+    const barCY = by + 3*a - r;
+    if (dist(mouseX, mouseY, barCX, barCY) < r) {
+      drag.active = true; drag.fromPt = 'bar';
+      drag.mouseX = drag.dispX = mouseX;
+      drag.mouseY = drag.dispY = mouseY;
+      drag.snapPt = null;
+      return;
+    }
+  }
+  if (mockState.turn === 'black' && mockState.bar.black > 0) {
+    const barCY = by + 10*a + r;
+    if (dist(mouseX, mouseY, barCX, barCY) < r) {
+      drag.active = true; drag.fromPt = 'bar';
+      drag.mouseX = drag.dispX = mouseX;
+      drag.mouseY = drag.dispY = mouseY;
+      drag.snapPt = null;
+      return;
+    }
   }
   for (let pt = 1; pt <= 24; pt++) {
     const val = mockState.points[pt];
@@ -442,7 +462,7 @@ function mouseDragged() {
   drag.mouseX = mouseX;
   drag.mouseY = mouseY;
   drag.snapPt = null;
-  for (const tpt of getValidTargets(drag.fromPt, mockState.dice)) {
+  for (const tpt of getValidTargets(drag.fromPt)) {
     if (tpt === 0) {
       if (diceOnSide) {
         // Paysage : snap à droite du tablier
@@ -461,14 +481,18 @@ function mouseDragged() {
 function mouseReleased() {
   if (!drag.active) return;
   if (drag.snapPt !== null) {
-    const sign = mockState.turn === 'white' ? 1 : -1;
-    mockState.points[drag.fromPt] -= sign;
-    if (drag.snapPt === 0) {
-      // Bearing off
-      if (mockState.turn === 'white') mockState.off.white++;
-      else                            mockState.off.black++;
+    if (gameMode) {
+      applyRealMove(drag.fromPt, drag.snapPt);
     } else {
-      mockState.points[drag.snapPt] += sign;
+      // Mode mock : mutation directe
+      const sign = mockState.turn === 'white' ? 1 : -1;
+      mockState.points[drag.fromPt] -= sign;
+      if (drag.snapPt === 0) {
+        if (mockState.turn === 'white') mockState.off.white++;
+        else                            mockState.off.black++;
+      } else {
+        mockState.points[drag.snapPt] += sign;
+      }
     }
   }
   drag.active = false; drag.fromPt = null; drag.snapPt = null;
@@ -476,7 +500,7 @@ function mouseReleased() {
 
 // ── Zone bearing off ──────────────────────────────────────────────────────────
 function drawOff() {
-  const canBearOff = drag.active && getValidTargets(drag.fromPt, mockState.dice).includes(0);
+  const canBearOff = drag.active && getValidTargets(drag.fromPt).includes(0);
   if (diceOnSide) drawOffLandscape(canBearOff);
   else            drawOffPortrait(canBearOff);
 }
@@ -496,11 +520,11 @@ function drawOffLandscape(canBearOff) {
   function yB(i) { return cy - r - (i%8)*step - h; }       // noirs vers le haut
 
   for (let i = 0; i < mockState.off.white; i++) {
-    fill(C.offwhite); stroke(C.ivory); strokeWeight(1);
+    fill(C.offwhite); noStroke();
     rect(px(i), yW(i), w, h);
   }
   for (let i = 0; i < mockState.off.black; i++) {
-    fill(C.ruby); stroke(C.ivory); strokeWeight(1);
+    fill(C.ruby); noStroke();
     rect(px(i), yB(i), w, h);
   }
   if (canBearOff) {
@@ -529,12 +553,12 @@ function drawOffPortrait(canBearOff) {
 
   // Blancs : alignées sur l'arête supérieure des dés blancs, droite → gauche
   for (let i = 0; i < mockState.off.white; i++) {
-    fill(C.offwhite); stroke(C.ivory); strokeWeight(1);
+    fill(C.offwhite); noStroke();
     rect(rx(i), yW, w, h);
   }
   // Noirs : alignées sur l'arête supérieure des dés noirs, droite → gauche
   for (let i = 0; i < mockState.off.black; i++) {
-    fill(C.ruby); stroke(C.ivory); strokeWeight(1);
+    fill(C.ruby); noStroke();
     rect(rx(i), yB, w, h);
   }
   // Fantôme
@@ -630,14 +654,15 @@ function drawInfo() {
   textAlign(LEFT, TOP);
   noStroke();
   fill(C.ivory);
-  const name = Object.keys(SCENARIOS).find(k => SCENARIOS[k] === mockState) || '?';
-  text(`[${name}] tour: ${mockState.turn}  dés: [${mockState.dice}]  — [1][2][3][4]`, 6, 4);
+  const name = gameMode ? 'GAME' : (Object.keys(SCENARIOS).find(k => SCENARIOS[k] === mockState) || '?');
+  text(`[${name}] tour: ${mockState.turn}  dés: [${mockState.dice}]  — [1][2][3][4]  [5]=jeu réel`, 6, 4);
 }
 
 // ── Raccourcis clavier ────────────────────────────────────────────────────────
 function keyPressed() {
-  if (key === '1') { mockState = SCENARIOS.initial;    clearDice(); }
-  if (key === '2') { mockState = SCENARIOS.midgame;    clearDice(); }
-  if (key === '3') { mockState = SCENARIOS.bearingOff; clearDice(); }
-  if (key === '4') { mockState = SCENARIOS.test1;      clearDice(); }
+  if (key === '1') { gameMode = false; mockState = SCENARIOS.initial;    clearDice(); }
+  if (key === '2') { gameMode = false; mockState = SCENARIOS.midgame;    clearDice(); }
+  if (key === '3') { gameMode = false; mockState = SCENARIOS.bearingOff; clearDice(); }
+  if (key === '4') { gameMode = false; mockState = SCENARIOS.test1;      clearDice(); }
+  if (key === '5') { startGame(); }   // Mode jeu réel
 }
