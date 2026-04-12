@@ -8,7 +8,7 @@ Browser-based backgammon game built with React + Vite. Play locally, against an 
 
 ```bash
 # Dev server (Docker, hot reload)
-docker compose --profile dev up dev
+docker compose --profile dev up -d dev
 # Open http://localhost:5173/lumpzammon/
 ```
 

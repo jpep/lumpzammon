@@ -173,7 +173,7 @@ Each player is shown with a rendered stone icon (white/black gradient) and their
 
 ```bash
 # Start dev server with hot reload on port 5173
-docker compose --profile dev up dev
+docker compose --profile dev up -d dev
 
 # Access at: http://localhost:5173/lumpzammon/
 ```
