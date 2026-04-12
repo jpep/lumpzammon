@@ -317,14 +317,17 @@ export default function GameScreen({
     const timer = setTimeout(() => {
       const { seq } = aiPlay(gs, P2);
       if (seq.length === 0) {
-        const newGs = clone(gs);
-        newGs.phase = 'roll';
-        newGs.turn = P1;
-        newGs.dice = [];
-        newGs.moves = [];
+        // Show dice for a moment before passing
         setPassOverlay(P2);
+        setTimeout(() => {
+          const newGs = clone(gs);
+          newGs.phase = 'roll';
+          newGs.turn = P1;
+          newGs.dice = [];
+          newGs.moves = [];
+          updateState(newGs);
+        }, 1500);
         setTimeout(() => setPassOverlay(null), 2000);
-        updateState(newGs);
         return;
       }
 
