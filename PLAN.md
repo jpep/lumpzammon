@@ -51,6 +51,7 @@ The board and screens are functional but visually basic. This phase brings them 
 
 ### Tasks
 
+- [x] **Opening roll rule** - Each player rolls one die; higher die wins and plays first using both dice as their opening move. Ties re-roll. No doubles possible on first move.
 - [ ] **Doubling cube** - Implement the doubling cube with proper accept/decline flow
 - [ ] **Match play** - Play to N points (not just single games), track scores
 - [ ] **Crawford rule** - Disable doubling cube when one player is 1 point from winning

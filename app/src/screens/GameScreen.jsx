@@ -4,7 +4,8 @@ import Checker from '../components/Checker';
 import DiceFace from '../components/DiceFace';
 import { useTheme } from '../ThemeContext';
 import {
-  newGameState, rollDice, getValidMoves, applyMove, checkWin, clone, calcPipCount, P1, P2
+  newGameState, rollDice, rollSingleDie, resolveOpening,
+  getValidMoves, applyMove, checkWin, clone, calcPipCount, P1, P2
 } from '../game/logic';
 import { aiPlay } from '../game/ai';
 import { saveLocalGame, loadLocalGame, clearLocalGame } from '../storage/local';
@@ -117,6 +118,7 @@ export default function GameScreen({
     moves: rawGs.moves || [],
     bar: rawGs.bar || { 1: 0, 2: 0 },
     off: rawGs.off || { 1: 0, 2: 0 },
+    openingRolls: rawGs.openingRolls || { 1: 0, 2: 0 },
   };
 
   const [selectedFrom, setSelectedFrom] = useState(null);
@@ -220,6 +222,65 @@ export default function GameScreen({
       callback();
     }, ANIMATION_DURATION + 50);
   }, []);
+
+  const handleOpeningRoll = useCallback(() => {
+    if (gs.phase !== 'opening') return;
+    const newGs = clone(gs);
+
+    if (isOnline) {
+      // Online: each player rolls their own die
+      const slot = playerSlot;
+      if (gs.openingRolls[slot] > 0) return; // already rolled this round
+      // If both were set (tied state), clear before rolling
+      if (gs.openingRolls[P1] > 0 && gs.openingRolls[P2] > 0) {
+        newGs.openingRolls = { 1: 0, 2: 0 };
+      }
+      newGs.openingRolls[slot] = rollSingleDie();
+      updateState(newGs);
+      return;
+    }
+
+    // Local and AI: roll one player at a time
+    if (gs.openingRolls[P1] === 0) {
+      newGs.openingRolls = { ...gs.openingRolls, [P1]: rollSingleDie() };
+    } else if (gs.openingRolls[P2] === 0 && !isAI) {
+      // Local mode: second click rolls P2's die
+      newGs.openingRolls = { ...gs.openingRolls, [P2]: rollSingleDie() };
+    }
+    updateState(newGs);
+  }, [gs, isOnline, isAI, playerSlot, updateState]);
+
+  // AI opening roll: AI (P2) rolls its die after human has rolled
+  useEffect(() => {
+    if (!isAI || gs.phase !== 'opening' || gs.openingRolls[P1] === 0) return;
+    if (gs.openingRolls[P2] > 0) return; // already rolled
+    const timer = setTimeout(() => {
+      const newGs = clone(gs);
+      newGs.openingRolls = { ...gs.openingRolls, [P2]: rollSingleDie() };
+      updateState(newGs);
+    }, 800);
+    return () => clearTimeout(timer);
+  }, [isAI, gs, updateState]);
+
+  // Opening resolution: both dice visible → hold briefly → resolve or handle tie
+  useEffect(() => {
+    if (gs.phase !== 'opening') return;
+    if (gs.openingRolls[P1] === 0 || gs.openingRolls[P2] === 0) return;
+    const tied = gs.openingRolls[P1] === gs.openingRolls[P2];
+    const timer = setTimeout(() => {
+      const newGs = clone(gs);
+      if (tied) {
+        // Clear both rolls so players can try again
+        newGs.openingRolls = { 1: 0, 2: 0 };
+      } else {
+        // Resolve into move phase
+        Object.assign(newGs, resolveOpening(gs.openingRolls));
+        setSelectedDie(newGs.dice[0]);
+      }
+      updateState(newGs);
+    }, tied ? 1500 : 1200);
+    return () => clearTimeout(timer);
+  }, [gs, updateState]);
 
   const handleRoll = useCallback(() => {
     if (gs.phase !== 'roll') return;
@@ -433,8 +494,12 @@ export default function GameScreen({
           name={playerName(P2)}
           player={P2}
           isYou={isOnline ? playerSlot === P2 : isAI ? false : false}
-          isTurn={currentPlayer === P2}
-          action={currentPlayer === P2 && !gs.winner ? (gs.phase === 'roll' ? 'Roll dice' : 'Move') : null}
+          isTurn={gs.phase === 'opening' ? false : currentPlayer === P2}
+          action={
+            gs.phase === 'opening'
+              ? (gs.openingRolls[P2] > 0 ? `rolled ${gs.openingRolls[P2]}` : null)
+              : (currentPlayer === P2 && !gs.winner ? (gs.phase === 'roll' ? 'Roll dice' : 'Move') : null)
+          }
           winner={gs.winner === P2}
           pip={pip2}
         />
@@ -447,8 +512,12 @@ export default function GameScreen({
           name={playerName(P1)}
           player={P1}
           isYou={isOnline ? playerSlot === P1 : isAI ? true : false}
-          isTurn={currentPlayer === P1}
-          action={currentPlayer === P1 && !gs.winner ? (gs.phase === 'roll' ? 'Roll dice' : 'Move') : null}
+          isTurn={gs.phase === 'opening' ? false : currentPlayer === P1}
+          action={
+            gs.phase === 'opening'
+              ? (gs.openingRolls[P1] > 0 ? `rolled ${gs.openingRolls[P1]}` : null)
+              : (currentPlayer === P1 && !gs.winner ? (gs.phase === 'roll' ? 'Roll dice' : 'Move') : null)
+          }
           winner={gs.winner === P1}
           align="right"
           pip={pip1}
@@ -531,8 +600,31 @@ export default function GameScreen({
       )}
 
       {/* Dice + controls */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginTop: 16 }}>
-        {gs.dice.length > 0 && gs.dice.map((d, i) => {
+      <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginTop: 16, flexWrap: 'wrap', justifyContent: 'center' }}>
+        {gs.phase === 'opening' && (
+          <>
+            {gs.openingRolls[P1] > 0 && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <Stone player={P1} size={14} />
+                <DiceFace value={gs.openingRolls[P1]} />
+              </div>
+            )}
+            {gs.openingRolls[P2] > 0 && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <Stone player={P2} size={14} />
+                <DiceFace value={gs.openingRolls[P2]} />
+              </div>
+            )}
+            {gs.openingRolls[P1] > 0 && gs.openingRolls[P2] > 0 &&
+              gs.openingRolls[P1] === gs.openingRolls[P2] && (
+              <span style={{ color: theme.textHighlight, fontWeight: 'bold', fontSize: 14 }}>
+                Tied! Rolling again...
+              </span>
+            )}
+          </>
+        )}
+
+        {gs.phase !== 'opening' && gs.dice.length > 0 && gs.dice.map((d, i) => {
           // Count how many of this die value have been used
           const totalOfValue = gs.dice.filter(v => v === d).length;
           const remainingOfValue = gs.moves.filter(v => v === d).length;
@@ -551,6 +643,43 @@ export default function GameScreen({
             />
           );
         })}
+
+        {gs.phase === 'opening' && (() => {
+          const bothRolled = gs.openingRolls[P1] > 0 && gs.openingRolls[P2] > 0;
+          if (bothRolled) return null; // resolving or showing tie, no button
+
+          if (isOnline) {
+            if (gs.openingRolls[playerSlot] === 0) {
+              return (
+                <button onClick={handleOpeningRoll} style={btnStyle}>
+                  Roll for first move
+                </button>
+              );
+            }
+            return (
+              <span style={{ color: theme.textSecondary, fontSize: 14 }}>
+                Waiting for opponent...
+              </span>
+            );
+          }
+
+          // Local: P1 rolls first, then P2
+          if (gs.openingRolls[P1] === 0) {
+            return (
+              <button onClick={handleOpeningRoll} style={btnStyle}>
+                {playerName(P1)} — Roll
+              </button>
+            );
+          }
+          // AI mode: P1 rolled, AI will auto-roll
+          if (isAI) return null;
+          // Local mode: P2's turn to roll
+          return (
+            <button onClick={handleOpeningRoll} style={btnStyle}>
+              {playerName(P2)} — Roll
+            </button>
+          );
+        })()}
 
         {gs.phase === 'roll' && !gs.winner && myTurn && !(isAI && currentPlayer === P2) && (
           <button onClick={handleRoll} style={btnStyle}>

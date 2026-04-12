@@ -29,7 +29,8 @@ export function newGameState() {
     bar: { 1: 0, 2: 0 },
     off: { 1: 0, 2: 0 },
     dice: [], moves: [],
-    turn: 0, phase: 'roll', winner: 0,
+    openingRolls: { 1: 0, 2: 0 },
+    turn: 0, phase: 'opening', winner: 0,
   };
 }
 
@@ -37,10 +38,38 @@ export function clone(s) {
   return JSON.parse(JSON.stringify(s));
 }
 
+export function rollSingleDie() {
+  return Math.floor(Math.random() * 6) + 1;
+}
+
 export function rollDice() {
   const a = Math.floor(Math.random() * 6) + 1;
   const b = Math.floor(Math.random() * 6) + 1;
   return a === b ? [a, a, a, a] : [a, b];
+}
+
+// Roll opening dice for local mode: each player rolls one die,
+// re-rolling ties internally until the values differ.
+export function rollOpeningDice() {
+  let a, b;
+  do {
+    a = rollSingleDie();
+    b = rollSingleDie();
+  } while (a === b);
+  return { 1: a, 2: b };
+}
+
+// Resolve opening rolls into move phase state.
+// Returns the fields to merge into game state, or null if tied.
+export function resolveOpening(rolls) {
+  if (rolls[1] === rolls[2]) return null;
+  const winner = rolls[1] > rolls[2] ? P1 : P2;
+  return {
+    dice: [rolls[1], rolls[2]],
+    moves: [rolls[1], rolls[2]],
+    phase: 'move',
+    turn: winner,
+  };
 }
 
 export function canLand(pts, i, pl) {

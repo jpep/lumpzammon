@@ -114,6 +114,7 @@ All game rules live in `src/game/logic.js` as pure functions with no dependencie
 
 - `initialBoard()` / `newGameState()` - Board setup (standard backgammon layout)
 - `rollDice()` - Random dice with doubles support (returns 4 dice on doubles)
+- `rollSingleDie()` / `resolveOpening()` - Opening roll: each player rolls one die, higher goes first using both dice as their first move (no doubles possible on first move)
 - `getValidMoves(state, player)` - Computes all legal moves considering bar, bearing off, etc.
 - `applyMove(state, player, move)` - Returns new immutable state after a move
 - `checkWin(state)` - Checks if either player has borne off all 15 checkers
