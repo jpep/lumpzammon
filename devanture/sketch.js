@@ -658,6 +658,11 @@ function drawInfo() {
   text(`[${name}] tour: ${mockState.turn}  dés: [${mockState.dice}]  — [1][2][3][4]  [5]=jeu réel`, 6, 4);
 }
 
+// ── Touch (délègue aux handlers souris, return false bloque scroll/zoom) ─────
+function touchStarted() { mousePressed();  return false; }
+function touchMoved()   { mouseDragged();  return false; }
+function touchEnded()   { mouseReleased(); return false; }
+
 // ── Raccourcis clavier ────────────────────────────────────────────────────────
 function keyPressed() {
   if (key === '1') { gameMode = false; mockState = SCENARIOS.initial;    clearDice(); }
