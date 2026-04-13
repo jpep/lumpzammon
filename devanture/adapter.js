@@ -34,7 +34,13 @@ function syncMockState() {
 function finalizeMoveStep() {
   const winner = Logic.checkWin(gameState);
   if (winner) console.log('Gagnant :', winner === 1 ? 'Blanc' : 'Noir');
-  if (gameState.moves.length === 0) setTimeout(endTurn, 400);
+  if (gameState.moves.length === 0) {
+    setTimeout(endTurn, 400);
+  } else {
+    // Des dés restent mais peut-être aucun coup jouable (barre bloquée, etc.)
+    const vm = Logic.getValidMoves(gameState, gameState.turn);
+    if (vm.length === 0) setTimeout(endTurn, 400);
+  }
   syncMockState();
 }
 
@@ -151,4 +157,49 @@ function startGame() {
 function rollRealDice() {
   if (!gameState) return;
   if (gameState.moves.length === 0 && gameState.phase === 'move') endTurn();
+}
+
+// ── Scénario de test [6] : entrée depuis la barre, un dé bloqué ──────────────
+// Blanc sur la barre, dés [3, 4]
+// Pt 22 (idx 21) libre  → entrée avec dé 3 possible
+// Pt 21 (idx 20) bloqué par 2 noires → entrée avec dé 4 impossible
+// Attendu : après l'entrée avec le 3, le dé 4 passe automatiquement
+function startBarEntryTest() {
+  gameState = Logic.newGameState();
+  gameMode  = true;
+  _passCount = 0;
+
+  // Vider le plateau
+  for (let i = 0; i < 24; i++) gameState.pts[i] = { n: 0, p: 0 };
+  gameState.bar = { 1: 0, 2: 0 };
+  gameState.off = { 1: 0, 2: 0 };
+
+  // Quelques pièces pour contextualiser
+  gameState.pts[0]  = { n: 2, p: 2 };  // pt  1 : 2 noires (coin)
+  gameState.pts[5]  = { n: 3, p: 1 };  // pt  6 : 3 blanches
+  gameState.pts[11] = { n: 2, p: 2 };  // pt 12 : 2 noires
+  gameState.pts[18] = { n: 3, p: 2 };  // pt 19 : 3 noires (home)
+  // Case bloquée : pt 21 (jpep idx 20) → 2 noires bloquent le dé 4
+  gameState.pts[20] = { n: 2, p: 2 };
+  // Case libre  : pt 22 (jpep idx 21) → entrée avec dé 3 possible
+
+  gameState.bar[1] = 1;   // 1 fiche blanche sur la barre
+  gameState.turn   = 1;
+  gameState.dice   = [3, 4];
+  gameState.moves  = [3, 4];
+
+  mockState = {
+    points:  new Array(25).fill(0),
+    bar:     { white: 0, black: 0 },
+    off:     { white: 0, black: 0 },
+    turn:    'white',
+    dice:    [],
+    phase:   'normal',
+    players: { white: 'WHITE', black: 'BLACK' },
+    timers:  null,
+  };
+
+  syncMockState();
+  clearDice();
+  startRoll([3, 4], 'white');
 }

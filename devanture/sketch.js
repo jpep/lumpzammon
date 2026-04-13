@@ -316,9 +316,9 @@ function drawCheckers() {
   const skipWhiteBar = drag.active && drag.fromPt === 'bar' && mockState.turn === 'white';
   const skipBlackBar = drag.active && drag.fromPt === 'bar' && mockState.turn === 'black';
   for (let i = 0; i < mockState.bar.white - (skipWhiteBar ? 1 : 0); i++)
-    drawChecker(barCX, by + 3*a - r - i*a, true, false);
+    drawChecker(barCX, by + 6.5*a - r - i*a, true, false);
   for (let i = 0; i < mockState.bar.black - (skipBlackBar ? 1 : 0); i++)
-    drawChecker(barCX, by + 10*a + r + i*a, false, false);
+    drawChecker(barCX, by + 6.5*a + r + i*a, false, false);
 }
 
 function drawStackOnPoint(pt, count, isWhite, skipTop) {
@@ -421,7 +421,7 @@ function mousePressed() {
   // Fiches sur la barre (priorité : must move bar pieces first)
   const barCX = bx + 6.5*a;
   if (mockState.turn === 'white' && mockState.bar.white > 0) {
-    const barCY = by + 3*a - r;
+    const barCY = by + 6.5*a - r - (mockState.bar.white - 1)*a;
     if (dist(mouseX, mouseY, barCX, barCY) < r) {
       drag.active = true; drag.fromPt = 'bar';
       drag.mouseX = drag.dispX = mouseX;
@@ -431,7 +431,7 @@ function mousePressed() {
     }
   }
   if (mockState.turn === 'black' && mockState.bar.black > 0) {
-    const barCY = by + 10*a + r;
+    const barCY = by + 6.5*a + r + (mockState.bar.black - 1)*a;
     if (dist(mouseX, mouseY, barCX, barCY) < r) {
       drag.active = true; drag.fromPt = 'bar';
       drag.mouseX = drag.dispX = mouseX;
@@ -655,7 +655,7 @@ function drawInfo() {
   noStroke();
   fill(C.ivory);
   const name = gameMode ? 'GAME' : (Object.keys(SCENARIOS).find(k => SCENARIOS[k] === mockState) || '?');
-  text(`[${name}] tour: ${mockState.turn}  dés: [${mockState.dice}]  — [1][2][3][4]  [5]=jeu réel`, 6, 4);
+  text(`[${name}] tour: ${mockState.turn}  dés: [${mockState.dice}]  — [1][2][3][4]  [5]=jeu réel  [b]=test barre`, 6, 4);
 }
 
 // ── Touch (délègue aux handlers souris, return false bloque scroll/zoom) ─────
@@ -669,5 +669,6 @@ function keyPressed() {
   if (key === '2') { gameMode = false; mockState = SCENARIOS.midgame;    clearDice(); }
   if (key === '3') { gameMode = false; mockState = SCENARIOS.bearingOff; clearDice(); }
   if (key === '4') { gameMode = false; mockState = SCENARIOS.test1;      clearDice(); }
-  if (key === '5') { startGame(); }   // Mode jeu réel
+  if (key === '5') { startGame(); }          // Mode jeu réel
+  if (key === 'b' || key === 'B') { startBarEntryTest(); } // Test barre
 }
