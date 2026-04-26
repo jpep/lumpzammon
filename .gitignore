@@ -9,3 +9,14 @@ dist/
 screenshots/
 
 WIP.md
+
+# Local Claude Code config (per-user, not for repo)
+.claude/
+
+# Stray reference copies (the live assets live in devanture/)
+/fond.jpg
+/fond[0-9]*.jpg
+/fond[0-9]*.png
+/p5.min.js
+/UsersVDM*
+/game/

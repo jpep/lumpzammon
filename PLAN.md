@@ -52,10 +52,10 @@ The board and screens are functional but visually basic. This phase brings them 
 ### Tasks
 
 - [x] **Opening roll rule** - Each player rolls one die; higher die wins and plays first using both dice as their opening move. Ties re-roll. No doubles possible on first move.
-- [ ] **Doubling cube** - Implement the doubling cube with proper accept/decline flow
-- [ ] **Match play** - Play to N points (not just single games), track scores
+- [x] **Doubling cube** - Implemented in the devanture skin (offer/accept/decline modals, capped at ❹, refusal = simple win at current cube value). Pending: port back into the React app.
+- [x] **Match play** - Session score `(N)` per player accumulates points across games; reset on new match via `[m]` or accepted invite. (Skin only for now.)
 - [ ] **Crawford rule** - Disable doubling cube when one player is 1 point from winning
-- [ ] **Gammon/backgammon detection** - Score 2x or 3x when opponent hasn't borne off / still has pieces in winner's home
+- [x] **Gammon/backgammon detection** - `classifyWin()` in `devanture/adapter.js` returns `simple|gammon|backgammon|resign`, multiplied by `cubeValue` for scoring.
 - [ ] **Move validation edge cases** - Audit: must use both dice if possible, must use larger die if only one can be used
 - [ ] **Auto-finish** - When a player has all checkers ahead of the opponent, auto bear-off option
 
@@ -132,6 +132,26 @@ The current AI is a single-step greedy evaluator. It works but is beatable.
 ## Bug Fixes
 
 - [x] **Fix duplicated checkers on bar (PR #9)** — Hit checkers appeared twice on the bar because `BarZone` was rendered in both board halves showing all players. Added `player` prop to `BarZone` so each half only shows the relevant player's checkers. Also restored `Board.jsx` to a valid component (PR had accidentally stripped the module wrapper).
+
+---
+
+## Phase 8: Devanture Skin → React Integration (next PR)
+
+The `devanture/` p5.js skin is a visual prototype that's now feature-complete enough to merge back into the React app. Each item below maps a skin feature to the React components/hooks that will need to be added or modified.
+
+### Tasks
+
+- [ ] **Doubling cube state** - Add `cubeValue / cubePromised / modalState` to `useGameState` (or new `useDoublingCube` hook). Modal components for offer/accept. Score multiplied by cube on game over.
+- [ ] **Move + game timers** - New `useTimers` hook: per-turn 15s move timer + per-player game timer. Pause during modals and animations. Forfeit on game-timer expiry.
+- [ ] **Resign action** - Resign button + confirmation, scored as simple × cubeValue. Pin the resign flag to the loser on game-over screen.
+- [ ] **Multi-pickup for doubles** - `applyMultipleMoves(from, to, count)` in `logic.js`, with `k = floor(diceLeft / count)` dice per piece. UI: detect click depth in stack, render the multi-checker drag.
+- [ ] **Match score** - `(N)` after player name = session games won. Persist across reload.
+- [ ] **Multiplayer ELO superscript** - `getMultiplayerScore(player)` reads from Firebase. Update with K-factor=32 ELO formula on game-over.
+- [ ] **Random background per match** - Pool of `fond*.jpg`, randomised on `startMatch()`. Re-extract dominant hue and rebuild theme palette.
+- [ ] **Mirror mode per match** - Toggle `direction` on each new match (already exists per game). Wire to skin's `mirrorMode` flag.
+- [ ] **Empty-dice auto-pass** - When `getValidMoves` returns empty, render dice frames at 25% opacity for 1.2s, then pass.
+- [ ] **Exit-to-room flow** - `↪▯` button next to player info. Confirmation modal during game, direct on game-over.
+- [ ] **Lobby UI** - Replace skin's mocked player list with the real Firebase lobby. Click → invite → opponent accept/decline → start game.
 
 ---
 

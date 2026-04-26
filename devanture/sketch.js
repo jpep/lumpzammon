@@ -9,18 +9,50 @@ let diceOnSide = true;   // true = dés à gauche (paysage) ; false = dés au-de
 const MARGIN    = 24;
 const MAX_STACK = 6;
 
+// Zones cliquables mises à jour à chaque draw
+let resignBtn = null;    // { x, y, w, h, player }
+let cubeBtns  = { white: null, black: null };
+let modalBtns = null;    // { yes, no, accept, decline, cancel }
+let exitBtns  = [];      // zones cliquables précises (au lieu d'un seul gros rectangle)
+let roomBtns  = [];      // [{ x, y, w, h, player }]
+let nameBlockW = { white: 0, black: 0 };
+
+// Joueur local (l'utilisateur sur cet écran) — par défaut blanc pour les tests
+const LOCAL_PLAYER = 'white';
+
+// État global de l'app : 'game' (table de jeu) | 'room' (lobby) | 'waiting' (attente invitation)
+let appState   = 'game';
+let inviteTarget = null;
+
+// Liste mockée de joueurs dans le room (à brancher sur le multijoueur jpep)
+const ROOM_PLAYERS = [
+  { name: 'ALICE',   online: true,  busy: false },
+  { name: 'BOB',     online: true,  busy: true  },
+  { name: 'CHARLIE', online: true,  busy: false },
+  { name: 'DIANA',   online: true,  busy: false },
+  { name: 'EVE',     online: false, busy: false },
+];
+
 let fontLarge, fontSmall;
 
 
 // ── Palette globale (accessible depuis dice.js) ───────────────────────────────
 let C;
 let bgImage;
-let dominantHue = 0;   // extrait de fond.jpg au setup
+let dominantHue = 0;   // extrait du fond au setup (mis à jour à chaque nouvelle partie)
+
+// Pool de fonds — l'un est tiré aléatoirement à chaque nouvelle partie (touche [m])
+const FOND_LIST = ['fond.jpg', 'fond0.jpg', 'fond1.jpg', 'fond2.jpg',
+                   'fond4.jpg', 'fond5.jpg', 'fond6.jpg'];
+let currentFond = 'fond.jpg';
+let mirrorMode  = false;   // bascule l'orientation des fiches d'une partie à l'autre
 
 function preload() {
-  bgImage   = loadImage('fond.jpg');
-  fontLarge = loadFont('fonts/nortechico-100.otf');
-  fontSmall = loadFont('fonts/nortechico-60.otf');
+  // Choix aléatoire d'un fond pour la 1ʳᵉ partie
+  currentFond = FOND_LIST[Math.floor(Math.random() * FOND_LIST.length)];
+  bgImage     = loadImage(currentFond);
+  fontLarge   = loadFont('fonts/nortechico-100.otf');
+  fontSmall   = loadFont('fonts/nortechico-60.otf');
 }
 
 // Extrait la teinte dominante de l'image (moyenne circulaire, pixels saturés seulement)
@@ -82,21 +114,26 @@ let drag = {
   mouseX: 0, mouseY: 0,
   dispX:  0, dispY:  0,
   snapPt: null,
+  numPieces: 1,   // multi-pickup pour les doubles
 };
 
 // ── Géométrie responsive ──────────────────────────────────────────────────────
+const NAMES_W_A = 8;   // largeur réservée à droite (a-units) pour nom + super + score + cube + drapeau + RESIGN?
+
 function computeGeometry() {
   diceOnSide = windowWidth >= windowHeight * 1.1;   // paysage → dés à gauche
 
   if (diceOnSide) {
-    // Zone dés à gauche : r/2 (gap plateau) + ds + r/2 (gap inter) + ds = 7r = 3.5a
-    // Total horizontal : 13a + 3.5a = 16.5a
+    // Plateau centré dans la fenêtre. Marges symétriques = max(3.5a dés, NAMES_W_A·a noms).
+    // Vertical : marge r*1.2 au-dessus et en-dessous pour les numéros 1-24.
     const maxW = windowWidth  - 2 * MARGIN;
     const maxH = windowHeight - 2 * MARGIN;
-    a  = min(maxW / 16.5, maxH / 13);
+    const sideA  = Math.max(3.5, NAMES_W_A);
+    const totalA = 13 + 2 * sideA;
+    const totalH = 13 + 1.2;
+    a  = min(maxW / totalA, maxH / totalH);
     r  = a / 2;
-    const diceW = 3.5 * a;   // 7r
-    bx = (windowWidth - 13*a - diceW) / 2 + diceW;
+    bx = (windowWidth  - 13*a) / 2;
     by = (windowHeight - 13*a) / 2;
   } else {
     // Dés au-dessus (noir) et en-dessous (blanc)
@@ -118,6 +155,27 @@ function setup() {
   computeGeometry();
   dominantHue = extractDominantHue(bgImage);
   buildPalette();
+  document.body.style.backgroundImage = `url('${currentFond}')`;
+}
+
+// ── Nouvelle partie : random fond + bascule miroir ────────────────────────────
+function newMatch() {
+  // Tire un fond différent du courant (si possible)
+  let next = currentFond;
+  if (FOND_LIST.length > 1) {
+    while (next === currentFond) {
+      next = FOND_LIST[Math.floor(Math.random() * FOND_LIST.length)];
+    }
+  }
+  currentFond = next;
+  loadImage(currentFond, (img) => {
+    bgImage = img;
+    dominantHue = extractDominantHue(img);
+    buildPalette();
+    document.body.style.backgroundImage = `url('${currentFond}')`;
+  });
+  mirrorMode = !mirrorMode;
+  // TODO: la bascule effective des positions/orientation viendra avec l'intégration jpep
 }
 
 function windowResized() {
@@ -142,6 +200,186 @@ function draw() {
   drawAllDice();
   drawPlayerInfo();
   drawInfo();
+  drawExitButton();
+  drawModal();
+  if (gameMode && gameWinner) drawGameOver();
+  if (appState === 'room')    drawRoom();
+  if (appState === 'waiting') drawWaiting();
+}
+
+// ↪▯ exit est dessiné inline dans drawSecondLine (portrait) ou
+// drawExitUnderPip (paysage). Plus rien à faire ici.
+function drawExitButton() { /* no-op */ }
+
+// ── Lobby (Room) — liste des joueurs disponibles ─────────────────────────────
+function drawRoom() {
+  noStroke(); fill(0, 0, 0, 200);
+  rect(0, 0, windowWidth, windowHeight);
+
+  // Cadre = mêmes coords que le plateau (contour extérieur)
+  noFill(); stroke(C.ivory); strokeWeight(1.5);
+  rect(bx, by, 13*a, 13*a);
+
+  // Titre
+  noStroke(); fill(C.ivory);
+  textAlign(CENTER, TOP);
+  if (fontLarge) textFont(fontLarge);
+  textSize(r * 1.6);
+  text('ROOM', bx + 13*a/2, by + r * 0.8);
+
+  // Sous-titre
+  textFont(fontSmall); textSize(r * 0.7);
+  text('CLICK A PLAYER TO INVITE', bx + 13*a/2, by + r * 3.2);
+
+  // Liste joueurs (centrée verticalement dans le cadre)
+  roomBtns = [];
+  textAlign(LEFT, CENTER); textFont(fontLarge); textSize(r * 1.0);
+  const startY = by + r * 5.5;
+  const lineH  = r * 1.6;
+  const colX   = bx + 2*a;
+  const colW   = 9 * a;
+
+  for (let i = 0; i < ROOM_PLAYERS.length; i++) {
+    const p = ROOM_PLAYERS[i];
+    const ly = startY + i * lineH;
+    const clickable = p.online && !p.busy;
+    const tag = !p.online ? 'OFFLINE' : (p.busy ? 'BUSY' : 'AVAILABLE');
+
+    // Pastille de statut
+    fill(p.online ? (p.busy ? C.ruby : C.offwhite) : color(120));
+    noStroke();
+    ellipse(colX, ly, r * 0.6, r * 0.6);
+
+    // Nom
+    const aFill = clickable ? 255 : 110;
+    fill(red(C.ivory), green(C.ivory), blue(C.ivory), aFill);
+    text(p.name, colX + r, ly);
+
+    // Tag à droite
+    textAlign(RIGHT, CENTER); textFont(fontSmall); textSize(r * 0.6);
+    text(tag, colX + colW, ly);
+    textAlign(LEFT, CENTER); textFont(fontLarge); textSize(r * 1.0);
+
+    if (clickable) {
+      roomBtns.push({ x: colX, y: ly - r*0.8, w: colW, h: r * 1.4, player: p });
+    }
+  }
+}
+
+// ── Modal d'attente d'acceptation d'invitation ───────────────────────────────
+function drawWaiting() {
+  noStroke(); fill(0, 0, 0, 200);
+  rect(0, 0, windowWidth, windowHeight);
+
+  const cx = windowWidth / 2;
+  const cy = windowHeight / 2;
+  fill(255); textAlign(CENTER, CENTER);
+  if (fontLarge) textFont(fontLarge);
+  textSize(r * 1.1);
+  text(`Waiting for ${inviteTarget ? inviteTarget.name : '...'}`, cx, cy - r * 1.4);
+
+  textSize(r * 0.7);
+  text('CANCEL', cx, cy + r * 0.8);
+  modalBtns = { cancel: { cx, cy: cy + r * 0.8, hw: r * 1.6, hh: r * 0.9 } };
+}
+
+// ── Modal "Offer double?" / "Accept?" (R7) ───────────────────────────────────
+function drawModal() {
+  modalBtns = null;
+  if (!modalState) return;
+
+  // Voile sombre semi-opaque sur tout l'écran
+  noStroke(); fill(0, 0, 0, 200);
+  rect(0, 0, windowWidth, windowHeight);
+
+  const cx = windowWidth / 2;
+  const cy = windowHeight / 2;
+  fill(255); textAlign(CENTER, CENTER);
+
+  if (modalState.type === 'offer') {
+    if (fontLarge) textFont(fontLarge);
+    textSize(r * 1.1);
+    text('Offer double?', cx, cy - r * 1.6);
+
+    textSize(r * 1.0);
+    const dx = r * 3;
+    const yY = cy + r * 0.8;
+    text('YES', cx - dx, yY);
+    text('NO',  cx + dx, yY);
+    modalBtns = {
+      yes: { cx: cx - dx, cy: yY, hw: r * 1.4, hh: r * 1.0 },
+      no:  { cx: cx + dx, cy: yY, hw: r * 1.4, hh: r * 1.0 },
+    };
+
+  } else if (modalState.type === 'quit') {
+    if (fontLarge) textFont(fontLarge);
+    textSize(r * 1.1);
+    text('Quit current game?', cx, cy - r * 1.6);
+
+    textSize(r * 1.0);
+    const dx = r * 3;
+    const yY = cy + r * 0.8;
+    text('YES', cx - dx, yY);
+    text('NO',  cx + dx, yY);
+    modalBtns = {
+      yes: { cx: cx - dx, cy: yY, hw: r * 1.4, hh: r * 1.0 },
+      no:  { cx: cx + dx, cy: yY, hw: r * 1.4, hh: r * 1.0 },
+    };
+
+  } else if (modalState.type === 'accept') {
+    if (fontLarge) textFont(fontLarge);
+    textSize(r * 0.9);
+    text('Your opponent offers you a double', cx, cy - r * 2.2);
+
+    textFont('Arial');
+    textSize(r * 2.7);
+    const dx = r * 3;
+    const yY = cy + r * 0.8;
+    const acceptBtn  = { cx: cx - dx, cy: yY, hw: r * 1.8, hh: r * 1.8 };
+    const declineBtn = { cx: cx + dx, cy: yY, hw: r * 1.8, hh: r * 1.8 };
+    const hoverA = isClickInBtn(acceptBtn);
+    const hoverD = isClickInBtn(declineBtn);
+
+    // ✓ : gras simulé via stroke au survol
+    fill(255);
+    if (hoverA) { stroke(255); strokeWeight(3); } else { noStroke(); }
+    text('\u2713', cx - dx, yY);
+
+    // ⚐ → ⚑ (drapeau plein) au survol
+    noStroke();
+    text(hoverD ? '\u2691' : '\u2690', cx + dx, yY);
+
+    modalBtns = { accept: acceptBtn, decline: declineBtn };
+  }
+}
+
+function isClickInBtn(btn) {
+  return Math.abs(mouseX - btn.cx) < btn.hw
+      && Math.abs(mouseY - btn.cy) < btn.hh;
+}
+
+// ── Overlay fin de partie ────────────────────────────────────────────────────
+function drawGameOver() {
+  noStroke();
+  fill(0, 0, 0, 170);
+  rect(0, 0, windowWidth, windowHeight);
+
+  const cx = windowWidth / 2;
+  const cy = windowHeight / 2;
+  const winnerName = gameWinner === 1
+    ? ((mockState.players && mockState.players.white) || 'WHITE')
+    : ((mockState.players && mockState.players.black) || 'BLACK');
+  const isResign = gameWinType === 'resign';
+  const pts   = (isResign ? 1 : winPoints(gameWinType)) * cubeValue;
+  const label = isResign ? 'RESIGN' : gameWinType.toUpperCase();
+
+  fill(C.ivory);
+  textAlign(CENTER, CENTER);
+  if (fontLarge) textFont(fontLarge);
+  textSize(r * 2.0); text('GAME OVER', cx, cy - r * 2.5);
+  textSize(r * 1.4); text(`${winnerName} WINS`, cx, cy - r * 0.5);
+  textSize(r * 1.0); text(`${label}  +${pts}`, cx, cy + r * 1.0);
+  textSize(r * 0.7); text('[5] nouvelle partie', cx, cy + r * 2.5);
 }
 
 // ── Smooth drag (vitesse d'accroche / 2) ─────────────────────────────────────
@@ -309,8 +547,8 @@ function drawCheckers() {
   for (let pt = 1; pt <= 24; pt++) {
     const val = mockState.points[pt];
     if (!val) continue;
-    const skipTop = drag.active && drag.fromPt === pt;
-    drawStackOnPoint(pt, abs(val), val > 0, skipTop);
+    const skipN = drag.active && drag.fromPt === pt ? (drag.numPieces || 1) : 0;
+    drawStackOnPoint(pt, abs(val), val > 0, skipN);
   }
   const barCX = bx + 6.5*a;
   const skipWhiteBar = drag.active && drag.fromPt === 'bar' && mockState.turn === 'white';
@@ -321,8 +559,8 @@ function drawCheckers() {
     drawChecker(barCX, by + 6.5*a + r + i*a, false, false);
 }
 
-function drawStackOnPoint(pt, count, isWhite, skipTop) {
-  const drawN   = skipTop ? count - 1 : count;
+function drawStackOnPoint(pt, count, isWhite, skipN) {
+  const drawN   = count - (skipN || 0);
   if (drawN <= 0) return;
   const cx      = ptCenterX(pt);
   const isBot   = pt <= 12;
@@ -360,17 +598,24 @@ function drawCheckerLabel(cx, cy, isWhite, label) {
   text(label, cx, cy);
 }
 
-// Pièce en cours de drag
+// Pièce(s) en cours de drag — la fiche cliquée est au curseur, les autres suivent
+// l'orientation de la pile sur le plateau (au-dessus pour pt 1-12, en-dessous pour 13-24)
 function drawDraggedChecker() {
   const isWhite = drag.fromPt === 'bar'
     ? mockState.turn === 'white'
     : mockState.points[drag.fromPt] > 0;
+  const N = drag.numPieces || 1;
+  // pt 1-12 (bas plateau, pile vers le haut sur le plateau) → empile vers le haut depuis curseur
+  // pt 13-24 (haut plateau, pile vers le bas sur le plateau) → empile vers le bas depuis curseur
+  const isBot = (drag.fromPt !== 'bar') && (drag.fromPt <= 12);
+  const dy = isBot ? -1 : 1;
   noStroke();
   fill(0, 0, 0, 25);
   ellipse(drag.dispX + 2, drag.dispY + 3, 2*r + 8, 2*r + 8);
   fill(isWhite ? C.offwhite : C.ruby);
-  noStroke();
-  ellipse(drag.dispX, drag.dispY, 2*r, 2*r);
+  for (let i = 0; i < N; i++) {
+    ellipse(drag.dispX, drag.dispY + dy * i * a, 2*r, 2*r);
+  }
 }
 
 // ── Mouvements valides ────────────────────────────────────────────────────────
@@ -411,8 +656,91 @@ function isPtAvailable(pt) {
 
 // ── Événements souris ─────────────────────────────────────────────────────────
 function mousePressed() {
+  // ── Room (lobby) : click sur joueur disponible → invitation + accept auto (mock) ──
+  if (appState === 'room') {
+    for (const btn of roomBtns) {
+      if (mouseX >= btn.x && mouseX <= btn.x + btn.w
+          && mouseY >= btn.y && mouseY <= btn.y + btn.h) {
+        inviteTarget = btn.player;
+        appState = 'waiting';
+        // Mock : l'adversaire accepte automatiquement après 1.5 s
+        setTimeout(() => {
+          if (appState === 'waiting' && inviteTarget === btn.player) {
+            appState = 'game';
+            // Reset score session pour une vraie nouvelle partie
+            if (typeof gameScore !== 'undefined') {
+              gameScore.white = 0; gameScore.black = 0;
+            }
+            startGame();
+            inviteTarget = null;
+          }
+        }, 1500);
+        return;
+      }
+    }
+    return;
+  }
+
+  // ── Waiting : cancel ──
+  if (appState === 'waiting') {
+    if (modalBtns && modalBtns.cancel && isClickInBtn(modalBtns.cancel)) {
+      appState = 'room';
+      inviteTarget = null;
+    }
+    return;
+  }
+
+  // R7 + Quit : modals prioritaires
+  if (modalState && modalBtns) {
+    if (modalState.type === 'offer') {
+      if (modalBtns.yes && isClickInBtn(modalBtns.yes)) { modalOfferResponse(true);  return; }
+      if (modalBtns.no  && isClickInBtn(modalBtns.no))  { modalOfferResponse(false); return; }
+    }
+    if (modalState.type === 'accept') {
+      if (modalBtns.accept  && isClickInBtn(modalBtns.accept))  { modalAcceptResponse(true);  return; }
+      if (modalBtns.decline && isClickInBtn(modalBtns.decline)) { modalAcceptResponse(false); return; }
+    }
+    if (modalState.type === 'quit') {
+      if (modalBtns.yes && isClickInBtn(modalBtns.yes)) {
+        modalState = null; appState = 'room'; return;
+      }
+      if (modalBtns.no && isClickInBtn(modalBtns.no)) {
+        modalState = null; return;
+      }
+    }
+    return;
+  }
+
+  // Bouton EXIT (↪▯) : zones cliquables précises (pas de zone englobante)
+  for (const eb of exitBtns) {
+    if (mouseX >= eb.x && mouseX <= eb.x + eb.w
+        && mouseY >= eb.y && mouseY <= eb.y + eb.h) {
+      if (gameWinner) { appState = 'room'; }
+      else            { modalState = { type: 'quit' }; }
+      return;
+    }
+  }
+
+  if (gameMode && gameWinner) return;
+
+  // R6 : drapeau RESIGN
+  if (resignBtn
+      && mouseX >= resignBtn.x && mouseX <= resignBtn.x + resignBtn.w
+      && mouseY >= resignBtn.y && mouseY <= resignBtn.y + resignBtn.h) {
+    resign(resignBtn.player);
+    return;
+  }
+
+  // R7 : clic sur le doubling cube du joueur courant
+  const cb = cubeBtns && cubeBtns[mockState.turn];
+  if (cb && dist(mouseX, mouseY, cb.x, cb.y) <= cb.r) {
+    clickCube(mockState.turn);
+    return;
+  }
+
   if (isClickOnDiceZone(mouseX, mouseY, mockState.turn)) {
-    if (diceAnim.state === DS.EMPTY || diceAnim.state === DS.DONE) {
+    // En mode jeu réel : pas de relance manuelle (les dés sont gérés par endTurn)
+    if (!gameMode && (diceAnim.state === DS.EMPTY || diceAnim.state === DS.DONE)) {
       clearDice();
       startRoll(mockState.dice, mockState.turn);
     }
@@ -423,7 +751,7 @@ function mousePressed() {
   if (mockState.turn === 'white' && mockState.bar.white > 0) {
     const barCY = by + 6.5*a - r - (mockState.bar.white - 1)*a;
     if (dist(mouseX, mouseY, barCX, barCY) < r) {
-      drag.active = true; drag.fromPt = 'bar';
+      drag.active = true; drag.fromPt = 'bar'; drag.numPieces = 1;
       drag.mouseX = drag.dispX = mouseX;
       drag.mouseY = drag.dispY = mouseY;
       drag.snapPt = null;
@@ -433,7 +761,7 @@ function mousePressed() {
   if (mockState.turn === 'black' && mockState.bar.black > 0) {
     const barCY = by + 6.5*a + r + (mockState.bar.black - 1)*a;
     if (dist(mouseX, mouseY, barCX, barCY) < r) {
-      drag.active = true; drag.fromPt = 'bar';
+      drag.active = true; drag.fromPt = 'bar'; drag.numPieces = 1;
       drag.mouseX = drag.dispX = mouseX;
       drag.mouseY = drag.dispY = mouseY;
       drag.snapPt = null;
@@ -445,15 +773,36 @@ function mousePressed() {
     if (!val) continue;
     if (mockState.turn === 'white' && val < 0) continue;
     if (mockState.turn === 'black' && val > 0) continue;
-    const cx = ptCenterX(pt), cy = ptTopY(pt);
-    if (dist(mouseX, mouseY, cx, cy) < r) {
-      drag.active = true;
-      drag.fromPt = pt;
-      drag.mouseX = drag.dispX = mouseX;
-      drag.mouseY = drag.dispY = mouseY;
-      drag.snapPt = null;
-      break;
+    const cx = ptCenterX(pt);
+    const stackCount = abs(val);
+    const isBot      = pt <= 12;
+    const visible    = min(stackCount, MAX_STACK);
+
+    // Détecte la fiche cliquée dans la pile (i=0 = bas/sommet plateau, i=visible-1 = top de la pile)
+    let clickedIdx = -1;
+    for (let i = 0; i < visible; i++) {
+      const cy = isBot ? by + 13*a - r - i*a : by + r + i*a;
+      if (dist(mouseX, mouseY, cx, cy) < r) clickedIdx = i;
     }
+    if (clickedIdx < 0) continue;
+
+    // numTaken = nombre de fiches du dessus (incluse la cliquée)
+    let numTaken = visible - clickedIdx;
+    // Multi-pickup uniquement sur les doubles ; capper aux dés restants
+    if (gameMode && gameState && gameState.dice && gameState.dice.length === 4) {
+      numTaken = min(numTaken, gameState.moves.length);
+    } else {
+      numTaken = 1;
+    }
+    if (numTaken < 1) numTaken = 1;
+
+    drag.active   = true;
+    drag.fromPt   = pt;
+    drag.numPieces = numTaken;
+    drag.mouseX   = drag.dispX = mouseX;
+    drag.mouseY   = drag.dispY = mouseY;
+    drag.snapPt   = null;
+    break;
   }
 }
 
@@ -482,7 +831,9 @@ function mouseReleased() {
   if (!drag.active) return;
   if (drag.snapPt !== null) {
     if (gameMode) {
-      applyRealMove(drag.fromPt, drag.snapPt);
+      const N = drag.numPieces || 1;
+      if (N > 1) applyMultipleMoves(drag.fromPt, drag.snapPt, N);
+      else       applyRealMove(drag.fromPt, drag.snapPt);
     } else {
       // Mode mock : mutation directe
       const sign = mockState.turn === 'white' ? 1 : -1;
@@ -496,6 +847,7 @@ function mouseReleased() {
     }
   }
   drag.active = false; drag.fromPt = null; drag.snapPt = null;
+  drag.numPieces = 1;
 }
 
 // ── Zone bearing off ──────────────────────────────────────────────────────────
@@ -506,7 +858,7 @@ function drawOff() {
 }
 
 function drawOffLandscape(canBearOff) {
-  const ox   = bx + 13*a + r;   // x gauche colonne 0
+  const ox   = bx + 13*a + r;   // gap r entre plateau et 1ʳᵉ fiche
   const w    = 2*r;
   const h    = r * 0.4;
   const gap  = h;                // espace entre fiches = h (r*0.4)
@@ -538,42 +890,53 @@ function drawOffLandscape(canBearOff) {
 
 function drawOffPortrait(canBearOff) {
   // Fiches pivotées 90° : 0.4r de large × 2r de haut
-  // Empilées droite → gauche, r/2 du bord droit du plateau, r/2 entre fiches
-  const w    = r * 0.4;        // largeur (fine) après rotation
-  const h    = 2 * r;          // hauteur après rotation
-  const gap  = r / 2;          // espace entre fiches
-  const step = w + gap;        // pas horizontal
-  const x0   = bx + 13*a - r/2; // bord droit de la 1ʳᵉ fiche
+  // Empilées droite → gauche, bord droit de la 1ʳᵉ fiche au bord du plateau
+  const w    = r * 0.4;
+  const h    = 2 * r;
+  const gap  = (r / 2) * 4/5;
+  const step = w + gap;
+  const x0   = bx + 13*a;
+  const MAX_OFF_VIS = 8;       // au-delà, afficher "+N" pour éviter chevauchement texte
 
-  function rx(i) { return x0 - w - i * step; }  // x gauche de la fiche i
+  function rx(i) { return x0 - w - i * step; }
 
-  const ds   = dieSize();
-  const yW   = by + 13*a + r*1.6;       // bord sup des dés blancs (côté plateau)
-  const yB   = by - r*1.6 - h;          // bord inf des dés noirs (côté plateau) − h
+  const yW   = by + 13*a + r*1.6;
+  const yB   = by - r*1.6 - h;
+  const szN  = r * 1.4;        // même taille de référence que drawPlayerInfo
 
-  // Blancs : alignées sur l'arête supérieure des dés blancs, droite → gauche
-  for (let i = 0; i < mockState.off.white; i++) {
-    fill(C.offwhite); noStroke();
-    rect(rx(i), yW, w, h);
+  function drawOffStack(off, y, fillColor) {
+    const visible = Math.min(off, MAX_OFF_VIS);
+    fill(fillColor); noStroke();
+    for (let i = 0; i < visible; i++) rect(rx(i), y, w, h);
+    if (off > MAX_OFF_VIS) {
+      const overflow = off - MAX_OFF_VIS;
+      const labelRight = rx(MAX_OFF_VIS - 1) - r * 0.5;   // espacement avant la pile
+      textAlign(RIGHT, CENTER); noStroke();
+      textFont(fontLarge); textSize(szN * 0.8);
+      fill(C.ivory);
+      text('+' + overflow, labelRight, y + h / 2);
+    }
   }
-  // Noirs : alignées sur l'arête supérieure des dés noirs, droite → gauche
-  for (let i = 0; i < mockState.off.black; i++) {
-    fill(C.ruby); noStroke();
-    rect(rx(i), yB, w, h);
-  }
-  // Fantôme
+
+  drawOffStack(mockState.off.white, yW, C.offwhite);
+  drawOffStack(mockState.off.black, yB, C.ruby);
+
+  // Fantôme : seulement si la prochaine fiche reste dans la zone visible
   if (canBearOff) {
     const isW  = mockState.turn === 'white';
     const idx  = isW ? mockState.off.white : mockState.off.black;
-    const base = isW ? C.offwhite : C.ruby;
-    noStroke(); fill(red(base), green(base), blue(base), 153);
-    rect(rx(idx), isW ? yW : yB, w, h);
+    if (idx < MAX_OFF_VIS) {
+      const base = isW ? C.offwhite : C.ruby;
+      noStroke(); fill(red(base), green(base), blue(base), 153);
+      rect(rx(idx), isW ? yW : yB, w, h);
+    }
   }
 }
 
 // ── Numéros des points ────────────────────────────────────────────────────────
 function drawPointNumbers() {
-  textSize(11);
+  textFont(fontSmall);
+  textSize(r * 0.55);
   textAlign(CENTER, CENTER);
   noStroke();
   fill(C.ivory);
@@ -603,49 +966,262 @@ function drawPlayerInfo() {
 
   const pipW  = computePip('white');
   const pipB  = computePip('black');
-  const nameW = (mockState.players && mockState.players.white) || 'USER 2';
-  const nameB = (mockState.players && mockState.players.black) || 'USER 1';
-  const t     = mockState.timers;
-  const timerStr = t
-    ? '(' + String(t.move).padStart(2, '0') + ')  ' + t.game
-    : null;
-
+  const sW    = (typeof gameScore !== 'undefined') ? gameScore.white : 0;
+  const sB    = (typeof gameScore !== 'undefined') ? gameScore.black : 0;
+  const baseW = (mockState.players && mockState.players.white) || 'USER 2';
+  const baseB = (mockState.players && mockState.players.black) || 'USER 1';
   const szN = r * 1.4;
   const szP = r * 0.85;
   const gap = r * 0.2;
 
-  // Hauteur totale d'un bloc (nom + pip [+ timer])
-  function blockH() { return szN + gap + szP + (timerStr ? gap + szP : 0); }
+  // En paysage : ↪▯ ajouté sous le PIP → bloc plus grand
+  const szExit  = r * 1.0;
+  const exitGap = r * 0.5;   // espacement supplémentaire avant ↪▯
+  function blockH() { return szN + gap + szP + (diceOnSide ? exitGap + szExit : 0); }
 
-  // Dessine un bloc aligné à gauche depuis (x, y) vers le bas
-  function drawBlockLeft(name, pip, x, y) {
+  // Dessine ↪▯ sous le PIP (paysage uniquement, joueur local seulement) + hover
+  function drawExitUnderPip(x, y) {
+    const arrow = '\u21AA';
+    const rect0 = '\u25AF';
+    const rect1 = '\u25AE';
+    textFont('Arial'); textSize(szExit); textAlign(LEFT, TOP);
+    noStroke(); fill(C.ivory);
+    const arrowW = textWidth(arrow);
+    const rectW  = textWidth(rect0);
+    const totalW = arrowW + rectW;
+    const isHover = mouseX >= x && mouseX <= x + totalW
+                 && mouseY >= y && mouseY <= y + szExit;
+    text(arrow, x, y);
+    text(isHover ? rect1 : rect0, x + arrowW, y);
+    if (isHover) {
+      textFont(fontSmall); textSize(szExit * 0.7);
+      text('  EXIT?', x + totalW, y);
+    }
+    exitBtns.push({ x, y, w: totalW, h: szExit });
+  }
+
+  // Dessine la 2e ligne : +XXX⬤ (15) (1:59) [/ NOTICE]
+  function drawSecondLine(x, y, pip, player) {
+    const useDyn    = gameMode && !!timerState;
+    const isCurrent = mockState.turn === player;
+    // Seul le joueur courant voit son move timer décompter ; l'adversaire affiche (15) figé
+    const moveLeft  = (useDyn && isCurrent) ? timerState.moveLeft     : 15;
+    const gameSec   = useDyn               ? timerState[player].game : 119;
+    const active    = useDyn               ? timerState.active       : 'move';
+
     textAlign(LEFT, TOP);
-    textFont(fontLarge); textSize(szN); text(name,        x, y);
-    textFont(fontSmall); textSize(szP); text('pip ' + pip, x, y + szN + gap);
-    if (timerStr) text(timerStr, x, y + szN + gap + szP + gap);
+    noStroke();
+    let cx = x;
+
+    // +XXX (largeur fixe basée sur "+999")
+    textFont(fontSmall); textSize(szP);
+    fill(C.ivory);
+    const pipStr = '+' + pip;
+    text(pipStr, cx, y);
+    cx += textWidth('+999');
+
+    // ⬤ couleur du joueur — centré sur le milieu visuel du texte (top + ascent+descent)/2
+    const dotR     = szP * 0.40;
+    const padDotL  = szP * 0.10;   // faible espacement entre le nombre et le cercle
+    const padDotR  = szP * 0.25;
+    const dotCY    = y + (textAscent() + textDescent()) / 2;
+    fill(player === 'white' ? C.offwhite : C.ruby);
+    ellipse(cx + padDotL + dotR, dotCY, dotR * 2, dotR * 2);
+    cx += padDotL + dotR * 2 + padDotR;
+
+    // (MM) move timer — largeur fixe basée sur "(99)"
+    textFont(fontSmall); textSize(szP);
+    const moveStr = '(' + String(moveLeft).padStart(2, '0') + ')';
+    const aMove   = (!isCurrent || active === 'move') ? 255 : 128;
+    fill(red(C.ivory), green(C.ivory), blue(C.ivory), aMove);
+    text(moveStr, cx, y);
+    cx += textWidth('(99)');
+
+    // séparateur fixe
+    fill(C.ivory);
+    text(' ', cx, y);
+    cx += textWidth(' ');
+
+    // (M:SS) game timer — largeur fixe basée sur "(9:99)"
+    const mins = Math.floor(gameSec / 60);
+    const secs = gameSec % 60;
+    const gameStr = '(' + mins + ':' + String(secs).padStart(2, '0') + ')';
+    const aGame   = (!isCurrent || active === 'game') ? 255 : 128;
+    fill(red(C.ivory), green(C.ivory), blue(C.ivory), aGame);
+    text(gameStr, cx, y);
+    cx += textWidth('(9:99)');
+
+    // ↪▯ exit — en portrait, à la suite du game timer (joueur local seulement)
+    if (!diceOnSide && gameMode && LOCAL_PLAYER === player) {
+      cx += r * 0.4;
+      cx = drawExitInline(cx, y, szP);
+    }
+
+    // / NOTICE (visible uniquement côté joueur ayant promis le double)
+    if (gameMode && cubePromised === player) {
+      fill(C.ivory);
+      textFont(fontSmall); textSize(szP);
+      text(' / DOUBLE NEXT TURN', cx, y);
+    }
   }
 
-  // Dessine un bloc aligné à droite depuis (x, y) vers le bas
-  function drawBlockRight(name, pip, x, y) {
-    textAlign(RIGHT, TOP);
-    textFont(fontLarge); textSize(szN); text(name,        x, y);
-    textFont(fontSmall); textSize(szP); text('pip ' + pip, x, y + szN + gap);
-    if (timerStr) text(timerStr, x, y + szN + gap + szP + gap);
+  // Dessine ↪▯ inline + hover (▯→▮ + " EXIT?"). Retourne le nouveau cx.
+  function drawExitInline(x, y, sz) {
+    const arrow = '\u21AA';
+    const rect0 = '\u25AF';   // ▯ vide
+    const rect1 = '\u25AE';   // ▮ plein
+    textFont('Arial'); textSize(sz);
+    noStroke(); fill(C.ivory); textAlign(LEFT, TOP);
+    const arrowW = textWidth(arrow);
+    const rectW  = textWidth(rect0);
+    const totalW = arrowW + rectW;
+    const isHover = mouseX >= x && mouseX <= x + totalW
+                 && mouseY >= y && mouseY <= y + sz;
+    text(arrow, x, y);
+    text(isHover ? rect1 : rect0, x + arrowW, y);
+    let cx = x + totalW;
+    if (isHover) {
+      textFont(fontSmall); textSize(sz);
+      text('  EXIT?', cx, y);
+      cx += textWidth('  EXIT?');
+    }
+    exitBtns.push({ x, y, w: totalW, h: sz });
+    return cx;
   }
+
+  // Dessine : NAME ⁽elo⁾ (sessionScore) — superscript entre le nom et le score session
+  function drawNameLeft(baseName, sessionScore, x, y, player) {
+    textAlign(LEFT, TOP);
+    fill(C.ivory); noStroke();
+    let cx = x;
+
+    // Nom (taille normale)
+    textFont(fontLarge); textSize(szN);
+    text(baseName, cx, y);
+    cx += textWidth(baseName);
+
+    // Superscript : score multijoueur
+    const mpScore = (typeof getMultiplayerScore === 'function')
+      ? getMultiplayerScore(player) : 0;
+    cx += szN * 0.08;
+    textSize(szN * 0.45);
+    text(`(${mpScore})`, cx, y);
+    cx += textWidth(`(${mpScore})`);
+
+    // Score session (taille normale)
+    textSize(szN);
+    text(` (${sessionScore})`, cx, y);
+    cx += textWidth(` (${sessionScore})`);
+
+    nameBlockW[player] = cx - x;
+  }
+
+  // Reset des zones cliquables (recalculées plus bas)
+  resignBtn = null;
+  cubeBtns  = { white: null, black: null };
+  exitBtns  = [];
 
   if (diceOnSide) {
     // ── Paysage : à r/2 à droite de la ligne latérale droite du plateau ──
+    // ↪▯ ajouté sous le PIP du joueur local pour éviter la superposition avec RESIGN
     const x = bx + 13*a + r/2;
-    drawBlockLeft(nameB, pipB, x, by);                           // USER 1 (noir) – aligné haut plateau
-    drawBlockLeft(nameW, pipW, x, by + 13*a - blockH());        // USER 2 (blanc) – aligné bas plateau
+    // Black (haut) : top à by
+    drawNameLeft(baseB, sB, x, by, 'black');
+    drawSecondLine(x, by + szN + gap, pipB, 'black');
+    if (LOCAL_PLAYER === 'black')
+      drawExitUnderPip(x, by + szN + gap + szP + exitGap);
+    drawNameAccessories(x, by, szN, 'black');
+
+    // White (bas) : alignement inférieur sur le bord bas du plateau conservé
+    const yWtop = by + 13*a - blockH();
+    drawNameLeft(baseW, sW, x, yWtop, 'white');
+    drawSecondLine(x, yWtop + szN + gap, pipW, 'white');
+    if (LOCAL_PLAYER === 'white')
+      drawExitUnderPip(x, yWtop + szN + gap + szP + exitGap);
+    drawNameAccessories(x, yWtop, szN, 'white');
 
   } else {
     // ── Portrait : à droite des dés ──
     const ds = dieSize();
-    const tx = bx + 2*ds + r;   // droite des dés + gap r
-    drawBlockLeft(nameB, pipB, tx, by - ds - r*1.6);             // USER 1 (noir) – haut
-    drawBlockLeft(nameW, pipW, tx, by + 13*a + r*1.6);           // USER 2 (blanc) – bas
+    const tx = bx + 2*ds + r;
+    drawNameLeft(baseB, sB, tx, by - ds - r*1.6, 'black');
+    drawSecondLine(tx, by - ds - r*1.6 + szN + gap, pipB, 'black');
+    drawNameLeft(baseW, sW, tx, by + 13*a + r*1.6, 'white');
+    drawSecondLine(tx, by + 13*a + r*1.6 + szN + gap, pipW, 'white');
+    drawNameAccessories(tx, by - ds - r*1.6,   szN, 'black');
+    drawNameAccessories(tx, by + 13*a + r*1.6, szN, 'white');
   }
+}
+
+// ── Drapeau RESIGN + cube X 1/2/4 à droite du nom ────────────────────────────
+function drawNameAccessories(nameX, nameY, szN, player) {
+  // Si la partie est terminée par abandon : drapeau figé à côté du nom du perdant
+  if (gameMode && gameWinner && gameWinType === 'resign') {
+    const loserColor = gameWinner === 1 ? 'black' : 'white';
+    if (player === loserColor) {
+      const flagX = nameX + (nameBlockW[player] || 0) + r * 0.4;
+      textFont('Arial'); textSize(szN * 0.8);
+      noStroke(); fill(C.ivory); textAlign(LEFT, TOP);
+      text('\u2691', flagX, nameY);
+    }
+    return;
+  }
+  if (!gameMode || gameWinner) return;
+
+  const totalNameW = nameBlockW[player] || 0;
+  const isCurrentTurn = mockState.turn === player;
+
+  // ── Cube X 1/2/4 ──
+  const cubeR = r * 0.5;
+  const cubeX = nameX + totalNameW + r * 0.4 + cubeR;
+  const cubeY = nameY + szN * 0.5;
+  drawDoublingCube(cubeX, cubeY, cubeR, player, isCurrentTurn);
+
+  // ── Drapeau RESIGN (uniquement pour le joueur courant) ──
+  if (isCurrentTurn) {
+    const flagX = cubeX + cubeR + r * 0.4;
+    const flagY = nameY;
+    const flagH = szN * 0.8;
+    textFont('Arial'); textSize(flagH);
+    const flagW = textWidth('⚐');
+    const isHover = mouseX >= flagX && mouseX <= flagX + flagW
+                 && mouseY >= flagY && mouseY <= flagY + flagH;
+    resignBtn = { x: flagX, y: flagY, w: flagW, h: flagH, player };
+
+    fill(C.ivory); noStroke(); textAlign(LEFT, TOP);
+    text(isHover ? '⚑' : '⚐', flagX, flagY);
+    if (isHover) {
+      textFont(fontSmall); textSize(szN * 0.55);
+      text('  RESIGN?', flagX + flagW, flagY);
+    }
+  }
+}
+
+// ── Doubling cube (R7) — caractères ❶ ❷ ❹ ────────────────────────────────────
+function drawDoublingCube(cx, cy, rad, player, isCurrentTurn) {
+  const v  = (typeof cubeValue !== 'undefined') ? cubeValue : 1;
+  const ch = v === 1 ? '\u2776' : v === 2 ? '\u2777' : '\u2779';
+
+  // alpha de base 25% ; pendant son tour : pulsation 25% → 100% → 25%
+  let aMul = 0.25;
+  if (isCurrentTurn && cubePromised !== player && !modalState) {
+    const t = (millis() / 1000) % 2;
+    if      (t < 0.7) aMul = 0.25 + (t / 0.7) * 0.75;
+    else if (t < 1.4) aMul = 1.0;
+    else              aMul = 1.0 - ((t - 1.4) / 0.6) * 0.75;
+  }
+  const isHover = isCurrentTurn && cubePromised !== player && !modalState
+               && dist(mouseX, mouseY, cx, cy) <= rad;
+  if (isHover) aMul = 1;
+
+  noStroke();
+  fill(red(C.ivory), green(C.ivory), blue(C.ivory), Math.round(255 * aMul));
+  textFont('Arial');
+  textSize(rad * 2.4);
+  textAlign(CENTER, CENTER);
+  text(ch, cx, cy);
+
+  cubeBtns[player] = { x: cx, y: cy, r: rad, player };
 }
 
 // ── Info scénario ─────────────────────────────────────────────────────────────
@@ -655,7 +1231,7 @@ function drawInfo() {
   noStroke();
   fill(C.ivory);
   const name = gameMode ? 'GAME' : (Object.keys(SCENARIOS).find(k => SCENARIOS[k] === mockState) || '?');
-  text(`[${name}] tour: ${mockState.turn}  dés: [${mockState.dice}]  — [1][2][3][4]  [5]=jeu réel  [b]=test barre`, 6, 4);
+  text(`[${name}] tour: ${mockState.turn}  dés: [${mockState.dice}]  fond: ${currentFond}${mirrorMode ? '  [MIRROR]' : ''}  — [1][2][3][4]  [5]=jeu réel  [b]=test barre  [m]=nouvelle partie`, 6, 4);
 }
 
 // ── Touch (délègue aux handlers souris, return false bloque scroll/zoom) ─────
@@ -671,4 +1247,5 @@ function keyPressed() {
   if (key === '4') { gameMode = false; mockState = SCENARIOS.test1;      clearDice(); }
   if (key === '5') { startGame(); }          // Mode jeu réel
   if (key === 'b' || key === 'B') { startBarEntryTest(); } // Test barre
+  if (key === 'm' || key === 'M') { newMatch(); }          // Nouvelle partie
 }

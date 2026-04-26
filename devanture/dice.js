@@ -53,6 +53,7 @@ function getDiePos(player, dieIdx) {
 // ── Initialisation ────────────────────────────────────────────────────────────
 function initDie(value) {
   const pips = PIP_LAYOUTS[value];
+  if (!pips) return null;
   const lo   = PAD_N + BALL_R_N, hi = 1 - PAD_N - BALL_R_N;
 
   // Mélanger les pips et les assigner aux 6 boules :
@@ -147,6 +148,27 @@ function drawAllDice() {
   drawDiceForPlayer('black');
 }
 
+// Un dé visuel est "fade" (alpha 25%) quand sa contribution est entièrement consommée.
+// Non-double : dé i est fade si sa valeur n'est plus dans gameState.moves
+// Double (4 mvts) : dé visuel 0 fade quand 2 mvts joués, dé 1 quand 4 mvts joués
+// R3 : si noMovesNotice actif pour ce joueur, les 2 dés sont fade
+function isDieFaded(dieIdx, player) {
+  if (typeof noMovesNotice !== 'undefined'
+      && noMovesNotice.active
+      && noMovesNotice.owner === player) return true;
+  if (!gameMode || !gameState) return false;
+  if (mockState.turn !== player) return false;   // pas de fade côté adversaire
+  const initial   = gameState.dice  || [];
+  const remaining = gameState.moves || [];
+  if (initial.length === 4) {
+    const played = initial.length - remaining.length;
+    return dieIdx === 0 ? played >= 2 : played >= 4;
+  }
+  const v = diceAnim.values[dieIdx];
+  if (v == null) return false;
+  return !remaining.includes(v);
+}
+
 function drawDiceForPlayer(player) {
   const ds    = dieSize();
   const ballR = ds * BALL_R_N;
@@ -154,17 +176,29 @@ function drawDiceForPlayer(player) {
   const show  = diceAnim.state !== DS.EMPTY && diceAnim.owner === player;
 
   for (let i = 0; i < 2; i++) {
-    const pos = getDiePos(player, i);
-    fill(C.board); stroke(C.ivory); strokeWeight(1.5);
+    const pos    = getDiePos(player, i);
+    const faded  = isDieFaded(i, player);
+    const aMul   = faded ? 0.25 : 1;
+
+    // Carré du dé : alpha multiplié sur fill et stroke
+    const bA = Math.round(alpha(C.board) * aMul);
+    const sA = Math.round(alpha(C.ivory) * aMul);
+    fill(red(C.board), green(C.board), blue(C.board), bA);
+    stroke(red(C.ivory), green(C.ivory), blue(C.ivory), sA);
+    strokeWeight(1.5);
     rect(pos.x, pos.y, ds, ds);
 
     if (!show || !diceAnim.dice[i]) continue;
+    // Pas de pips dessinés si on est dans la phase "no moves" pour ce joueur
+    if (typeof noMovesNotice !== 'undefined'
+        && noMovesNotice.active
+        && noMovesNotice.owner === player) continue;
 
     drawingContext.save();
     drawingContext.beginPath();
     drawingContext.rect(pos.x + inset, pos.y + inset, ds - 2*inset, ds - 2*inset);
     drawingContext.clip();
-    drawingContext.fillStyle = 'rgba(245,240,218,1)';
+    drawingContext.fillStyle = `rgba(245,240,218,${aMul})`;
 
     for (const b of diceAnim.dice[i].balls) {
       if (!b.active) continue;

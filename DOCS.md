@@ -241,3 +241,65 @@ PR #9 identified a bug where hit checkers appeared duplicated on the bar — `Bo
 ## Origin
 
 This project was scaffolded from a conversation with Claude Desktop. The seed files in `claude_seed/` contain the original artifacts: project structure, storage layer design, Firebase setup guide, and game logic. The React components, screens, hooks, Docker setup, and App router were built from these blueprints.
+
+---
+
+## Devanture Skin (p5.js standalone preview)
+
+A self-contained skin preview lives in `devanture/`. It runs without Vite/React (just `index.html` + p5.js from a CDN) and is intended as a visual prototype to be merged back into the React app once stable. A small Python dev server (`serve.py`) serves it with `Cache-Control: no-store` to avoid stale assets during iteration.
+
+### Run locally
+
+```bash
+python serve.py 3132 devanture
+# Open http://localhost:3132
+```
+
+The launch config is in `.claude/launch.json` (gitignored) for the Claude Code preview.
+
+### File layout
+
+```
+devanture/
+├── index.html                  # script loader (p5 CDN + local modules)
+├── sketch.js                   # main p5 sketch: rendering + input + UI states
+├── adapter.js                  # bridge between Logic state and rendered mockState
+├── dice.js                     # dice animation + fade states
+├── mockState.js                # static scenarios for visual tests ([1]-[4])
+├── game/
+│   ├── logic_standalone.js     # plain-JS port of src/game/logic.js
+│   └── ai_standalone.js        # placeholder AI (not used yet)
+├── fonts/                      # nortechico OTF (heading + small)
+├── fond.jpg / fond0…fond6.jpg  # background pool, randomised per match
+└── serve.py                    # dev server with no-cache headers (one level up)
+```
+
+### Keyboard
+
+| Key | Action |
+|-----|--------|
+| `1`-`4` | Load a static scenario from `mockState.js` |
+| `5` | Start a new game (real Logic, doubling cube enabled) |
+| `b` | Bar-entry test scenario |
+| `m` | Start a new **match**: random background + flips `mirrorMode` |
+
+### Game UI features
+
+- **Doubling cube** (`❶ ❷ ❹`) — per-player marker right of the name, pulses during own turn, click to promise a double for next turn. At the start of the next turn an "Offer double?" modal opens (YES/NO), then an "Accept?" modal on the opponent side (✓/⚐). Refusing gives the offerer the cube value as a simple win. Capped at ❹.
+- **Move + game timers** — `(15)` move timer (resets each turn) and `(M:SS)` game timer (per-player, only ticks for the active player). The active timer is at full opacity, the other at 50%. When the move timer hits 0 the game timer takes over; when the game timer hits 0 the player forfeits.
+- **Resign flag** — `⚐ → ⚑` on hover next to the active player, with `RESIGN?` label. Resign always counts as a simple loss × `cubeValue`. The flag stays pinned to the resigner after game over.
+- **Game-over overlay** — black veil + `GAME OVER`, winner name, win type (`SIMPLE / GAMMON / BACKGAMMON / RESIGN`), and points added (`× cubeValue`). Press `5` for a new game (score persists across the match).
+- **Session score** — `(N)` after the player name = games won this match. Multiplayer score is shown in superscript `⁽elo⁾` (placeholder = 0 until wired to Firebase).
+- **Multi-pickup for doubles** — clicking a piece below the top of a stack picks up that piece + all the ones above. With doubles, each piece can use multiple dice (`k = floor(diceLeft / N)`), so a `1-1` lets you move 2 pieces from `5` directly to `3`.
+- **Auto-pass with empty dice** — when the current player has no legal moves, the dice are shown as empty frames at 25% opacity for 1.2s, then the turn passes automatically.
+- **Exit to room** — `↪▯ → ↪▮` on hover with `EXIT?` label, drawn under the local player's PIP line in landscape, inline after the game timer in portrait. Click opens a `Quit current game?` confirmation; once the game is already over, click goes straight to the room.
+- **Room (lobby)** — black veil with the board outline as a frame, mocked player list with status (available/busy/offline). Clicking an available player opens a `Waiting for X` modal that auto-accepts after 1.5s and starts a fresh game. To be wired to the real Firebase lobby on integration.
+- **Random background per match** — pressing `m` (or auto-accepted invitation) tires a new background from `fond.jpg / fond0…fond6.jpg`, re-extracts the dominant hue and rebuilds the palette. `mirrorMode` toggles for each new match (visual flag for now; full mirroring will use the real `getBoardIndices(dir)` from `src/game/logic.js` once integrated).
+
+### Geometry
+
+The board is centred horizontally in the window. Side margins are `max(3.5a, NAMES_W_A)` (currently `NAMES_W_A = 8`) so the right-hand info column always has room for the longest hovered label (`RESIGN?`). Vertical margins reserve `~1.2a` for the point numbers (rendered with `nortechico-60`).
+
+### Multiplayer hook
+
+`getMultiplayerScore(player)` is referenced from `drawNameLeft` but not implemented yet — when wired, it should return the player's ELO from Firebase. The `LOCAL_PLAYER` constant (default `'white'`) controls which side shows the resign flag and exit button; this will become dynamic per session on integration.
