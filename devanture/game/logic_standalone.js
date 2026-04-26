@@ -89,7 +89,8 @@ const Logic = (() => {
     return -1;
   }
 
-  function getValidMoves(s, pl) {
+  // Liste brute des moves valides (sans appliquer la règle de mouvement obligatoire)
+  function getValidMovesRaw(s, pl) {
     const mv = [];
     const u = [...new Set(s.moves)];
 
@@ -118,6 +119,56 @@ const Logic = (() => {
       }
     }
     return mv;
+  }
+
+  // Profondeur max d'enchaînement de moves jouables depuis l'état s
+  function maxDiceSequence(s, pl) {
+    if (s.moves.length === 0) return 0;
+    const moves = getValidMovesRaw(s, pl);
+    if (moves.length === 0) return 0;
+    let best = 0;
+    for (const m of moves) {
+      const ns = applyMove(s, pl, m);
+      const sub = 1 + maxDiceSequence(ns, pl);
+      if (sub > best) best = sub;
+      if (best >= s.moves.length) return best;
+    }
+    return best;
+  }
+
+  // Wrapper appliquant les règles de mouvement obligatoire :
+  //   1. Doit jouer le maximum de dés possible
+  //   2. Si un seul dé peut être joué (sur deux différents), c'est le plus grand
+  function getValidMoves(s, pl) {
+    const all = getValidMovesRaw(s, pl);
+    if (all.length === 0) return [];
+    if (s.moves.length <= 1) return all;
+
+    // Calcul du nombre max de dés jouables sur l'enchaînement
+    let maxPlayable = 0;
+    for (const m of all) {
+      const ns  = applyMove(s, pl, m);
+      const sub = 1 + maxDiceSequence(ns, pl);
+      if (sub > maxPlayable) maxPlayable = sub;
+      if (maxPlayable >= s.moves.length) break;
+    }
+
+    // Filtre : on ne garde que les moves qui permettent d'atteindre maxPlayable
+    let filtered = all.filter(m => {
+      const ns = applyMove(s, pl, m);
+      return 1 + maxDiceSequence(ns, pl) >= maxPlayable;
+    });
+
+    // Sous-règle : si maxPlayable === 1 et 2 dés différents, doit jouer le plus grand
+    if (maxPlayable === 1 && s.moves.length === 2) {
+      const u = [...new Set(s.moves)];
+      if (u.length === 2) {
+        const maxD = Math.max(u[0], u[1]);
+        const onlyMax = filtered.filter(m => m.d === maxD);
+        if (onlyMax.length > 0) filtered = onlyMax;
+      }
+    }
+    return filtered;
   }
 
   function applyMove(s, pl, m) {
@@ -151,5 +202,6 @@ const Logic = (() => {
 
   return { P1, P2, initialBoard, newGameState, clone, rollSingleDie, rollDice,
            rollOpeningDice, resolveOpening, canLand, allHome, pipDist,
-           calcPipCount, farthestHome, getValidMoves, applyMove, checkWin };
+           calcPipCount, farthestHome, getValidMoves, getValidMovesRaw,
+           maxDiceSequence, applyMove, checkWin };
 })();

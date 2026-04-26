@@ -88,6 +88,24 @@ function startRoll(values, player) {
   };
 }
 
+// Pose les dés directement à leur état final (sans animation roll/settle)
+function setDiceFinal(values, player) {
+  diceAnim = {
+    state: DS.DONE, owner: player, frame: ROLL_FRAMES + SETTLE_FRAMES,
+    values, dice: [initDie(values[0]), initDie(values[1])]
+  };
+  for (const die of diceAnim.dice) {
+    if (!die) continue;
+    const seen = new Set();
+    for (const b of die.balls) {
+      b.nx = b.tnx; b.ny = b.tny;
+      const key = `${b.tnx},${b.tny}`;
+      if (seen.has(key)) b.active = false;
+      else seen.add(key);
+    }
+  }
+}
+
 // ── Update ────────────────────────────────────────────────────────────────────
 function updateDiceAnim() {
   if (diceAnim.state === DS.EMPTY || diceAnim.state === DS.DONE) return;
@@ -97,8 +115,10 @@ function updateDiceAnim() {
 
   // Phase 1 : agitation libre
   if (diceAnim.state === DS.ROLLING) {
-    for (const die of diceAnim.dice)
+    for (const die of diceAnim.dice) {
+      if (!die) continue;
       for (const b of die.balls) bounceOne(b, lo, hi);
+    }
     if (f >= ROLL_FRAMES) diceAnim.state = DS.SETTLING;
     return;
   }
@@ -107,16 +127,20 @@ function updateDiceAnim() {
   if (diceAnim.state === DS.SETTLING) {
     const sf    = f - ROLL_FRAMES;
     const lerpF = 0.06 + (sf / SETTLE_FRAMES) * 0.14;
-    for (const die of diceAnim.dice)
-      for (const b of die.balls)
+    for (const die of diceAnim.dice) {
+      if (!die) continue;
+      for (const b of die.balls) {
         if (b.active) {
           b.nx += (b.tnx - b.nx) * lerpF;
           b.ny += (b.tny - b.ny) * lerpF;
         }
+      }
+    }
 
     if (sf >= SETTLE_FRAMES) {
       // Dédoublonnage : garder une seule boule par pip
       for (const die of diceAnim.dice) {
+        if (!die) continue;
         const seen = new Set();
         for (const b of die.balls) {
           const key = `${b.tnx},${b.tny}`;
@@ -160,6 +184,7 @@ function isDieFaded(dieIdx, player) {
   if (mockState.turn !== player) return false;   // pas de fade côté adversaire
   const initial   = gameState.dice  || [];
   const remaining = gameState.moves || [];
+  if (initial.length === 0) return false;   // opening roll / pas de dés actifs → pas de fade
   if (initial.length === 4) {
     const played = initial.length - remaining.length;
     return dieIdx === 0 ? played >= 2 : played >= 4;
@@ -175,40 +200,102 @@ function drawDiceForPlayer(player) {
   const inset = ds * CLIP_INSET_N;
   const show  = diceAnim.state !== DS.EMPTY && diceAnim.owner === player;
 
+  // Détection : sommes-nous dans une phase opening (avec contenu spécial pour ce joueur) ?
+  const inOpening = (typeof openingActive !== 'undefined' && openingActive)
+                 || (typeof openingDisplay !== 'undefined'
+                     && (openingDisplay.white > 0 || openingDisplay.black > 0))
+                 || (typeof openingTransition !== 'undefined' && openingTransition);
+
   for (let i = 0; i < 2; i++) {
     const pos    = getDiePos(player, i);
-    const faded  = isDieFaded(i, player);
-    const aMul   = faded ? 0.25 : 1;
 
-    // Carré du dé : alpha multiplié sur fill et stroke
-    const bA = Math.round(alpha(C.board) * aMul);
-    const sA = Math.round(alpha(C.ivory) * aMul);
+    // Détermine quoi dessiner pour ce slot ; si rien : pas même de carré (évite les fantômes)
+    let drawAlpha    = 0;     // opacité du carré (0 = invisible)
+    let pipsAlpha    = 0;     // opacité des pips
+    let pipsValue    = null;  // valeur statique
+    let pipsFromAnim = false; // utiliser diceAnim.dice[i]
+
+    if (typeof openingTransition !== 'undefined' && openingTransition) {
+      // Transition opening : un seul couple à animer
+      const tt = ((millis ? millis() : performance.now()) - openingTransition.t0) / openingTransition.dur;
+      const tf = Math.max(0, Math.min(1, tt));
+      if (player === openingTransition.loser && i === 0) {
+        drawAlpha = 1 - tf; pipsAlpha = 1 - tf; pipsValue = openingTransition.loserValue;
+      } else if (player === openingTransition.winner && i === 0) {
+        drawAlpha = 1; pipsAlpha = 1; pipsValue = openingTransition.winnerValue;
+      } else if (player === openingTransition.winner && i === 1) {
+        drawAlpha = tf; pipsAlpha = tf; pipsValue = openingTransition.loserValue;
+      }
+    } else if (inOpening) {
+      // Phase A/B/C de l'opening : animation + statique
+      if (show && diceAnim.dice[i]) {
+        drawAlpha = 1; pipsAlpha = 1; pipsFromAnim = true;
+      } else if (i === 0 && openingDisplay[player] > 0) {
+        drawAlpha = 1; pipsAlpha = 1; pipsValue = openingDisplay[player];
+      }
+      // sinon : pas de carré ni pips (skip total)
+    } else {
+      // Jeu normal :
+      //  - joueur courant : carrés + pips selon animation et fade
+      //  - joueur inactif : carrés en transparence (sans pips), toujours présents
+      const isCurrent = (typeof mockState !== 'undefined') && mockState.turn === player;
+      // 2 états visuels seulement :
+      //   - Dé actif (joueur courant + dé non joué) : carré 100% + pips
+      //   - Dé inactif (joueur adverse OU dé déjà joué) : carré 50% sans pips
+      if (!isCurrent) {
+        if (typeof hasOwnedDice !== 'undefined' && !hasOwnedDice[player]) continue;
+        drawAlpha = 0.5;
+        pipsAlpha = 0;
+      } else {
+        const faded = isDieFaded(i, player);
+        if (faded) {
+          drawAlpha = 0.5;
+          pipsAlpha = 0;
+        } else {
+          drawAlpha = 1;
+          if (show && diceAnim.dice[i]) {
+            pipsAlpha = 1;
+            pipsFromAnim = true;
+            if (typeof noMovesNotice !== 'undefined'
+                && noMovesNotice.active
+                && noMovesNotice.owner === player) {
+              pipsFromAnim = false;
+              pipsAlpha = 0;
+            }
+          }
+        }
+      }
+    }
+
+    if (drawAlpha <= 0) continue;   // rien à dessiner pour ce slot
+
+    // Carré
+    const bA = Math.round(alpha(C.board) * drawAlpha);
+    const sA = Math.round(alpha(C.ivory) * drawAlpha);
     fill(red(C.board), green(C.board), blue(C.board), bA);
     stroke(red(C.ivory), green(C.ivory), blue(C.ivory), sA);
     strokeWeight(1.5);
     rect(pos.x, pos.y, ds, ds);
 
-    if (!show || !diceAnim.dice[i]) continue;
-    // Pas de pips dessinés si on est dans la phase "no moves" pour ce joueur
-    if (typeof noMovesNotice !== 'undefined'
-        && noMovesNotice.active
-        && noMovesNotice.owner === player) continue;
-
-    drawingContext.save();
-    drawingContext.beginPath();
-    drawingContext.rect(pos.x + inset, pos.y + inset, ds - 2*inset, ds - 2*inset);
-    drawingContext.clip();
-    drawingContext.fillStyle = `rgba(245,240,218,${aMul})`;
-
-    for (const b of diceAnim.dice[i].balls) {
-      if (!b.active) continue;
+    // Pips
+    if (pipsAlpha <= 0) continue;
+    if (pipsFromAnim) {
+      drawingContext.save();
       drawingContext.beginPath();
-      drawingContext.arc(pos.x + b.nx * ds, pos.y + b.ny * ds, ballR, 0, Math.PI*2);
-      drawingContext.fill();
+      drawingContext.rect(pos.x + inset, pos.y + inset, ds - 2*inset, ds - 2*inset);
+      drawingContext.clip();
+      drawingContext.fillStyle = `rgba(245,240,218,${pipsAlpha})`;
+      for (const b of diceAnim.dice[i].balls) {
+        if (!b.active) continue;
+        drawingContext.beginPath();
+        drawingContext.arc(pos.x + b.nx * ds, pos.y + b.ny * ds, ballR, 0, Math.PI*2);
+        drawingContext.fill();
+      }
+      drawingContext.restore();
+      noFill(); stroke(C.ivory); strokeWeight(1.5);
+    } else if (pipsValue !== null) {
+      drawStaticPips(pipsValue, pos, pipsAlpha);
     }
-
-    drawingContext.restore();
-    noFill(); stroke(C.ivory); strokeWeight(1.5);
   }
 }
 
@@ -224,3 +311,25 @@ function isClickOnDiceZone(px, py, player) {
 
 function clearDice()   { diceAnim = { state:DS.EMPTY, owner:'white', frame:0, values:[0,0], dice:[null,null] }; }
 function rescaleDice() {}
+
+// Dessine les pips statiques d'un dé avec une opacité (1 = plein, 0 = invisible)
+function drawStaticPips(value, pos, alpha) {
+  if (alpha === undefined) alpha = 1;
+  if (alpha <= 0) return;
+  const ds    = dieSize();
+  const ballR = ds * BALL_R_N;
+  const inset = ds * CLIP_INSET_N;
+  const pips  = PIP_LAYOUTS[value];
+  if (!pips) return;
+  drawingContext.save();
+  drawingContext.beginPath();
+  drawingContext.rect(pos.x + inset, pos.y + inset, ds - 2*inset, ds - 2*inset);
+  drawingContext.clip();
+  drawingContext.fillStyle = `rgba(245,240,218,${alpha})`;
+  for (const p of pips) {
+    drawingContext.beginPath();
+    drawingContext.arc(pos.x + p[0] * ds, pos.y + p[1] * ds, ballR, 0, Math.PI*2);
+    drawingContext.fill();
+  }
+  drawingContext.restore();
+}

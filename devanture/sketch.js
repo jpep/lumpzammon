@@ -17,6 +17,9 @@ let exitBtns  = [];      // zones cliquables précises (au lieu d'un seul gros r
 let roomBtns  = [];      // [{ x, y, w, h, player }]
 let nameBlockW = { white: 0, black: 0 };
 
+// Animation d'un mouvement (trajectoire parabolique) — visualisation pour IA / adversaire
+let flyingChecker = null;   // { from, to, isWhite, fromX, fromY, toX, toY, t0, dur, onDone }
+
 // Joueur local (l'utilisateur sur cet écran) — par défaut blanc pour les tests
 const LOCAL_PLAYER = 'white';
 
@@ -90,20 +93,23 @@ function extractDominantHue(img) {
 // Palette monochrome dérivée de la teinte dominante de fond.jpg
 // Les % d'opacité sont fixes ; la teinte suit l'image.
 function buildPalette() {
-  const h = dominantHue;
+  // Si la teinte tombe dans le violet (270-330°), on l'écarte vers le rouge profond
+  // pour éviter les rendus chromatiques bizarres sur certains fonds.
+  let h = dominantHue;
+  if (h >= 270 && h <= 330) h = (h < 300) ? 260 : 340;
   colorMode(HSB, 360, 100, 100, 255);
   C = {
-    bg:       color(h, 22,  96, 255),    // tint très léger (non utilisé en fond direct)
-    board:    color(h, 52,  62, 153),    // plateau   60 % opacité
-    triA:     color(h, 78,  32, 128),    // triangle foncé    50 %
-    triB:     color(h, 90,  18, 128),    // triangle très foncé 50 %
-    bar:      color(h, 42,  52, 153),    // barre     60 %
-    ivory:    color(h,  8,  97, 255),    // ivoire (lignes, textes)
-    ruby:     color(h, 85,  32, 255),    // fiche noire : foncé saturé
-    offwhite: color(h, 12,  92, 255),    // fiche blanche : quasi-blanc teinté
-    numColor: color(h, 90,  16, 255),    // numéros très foncés
-    fiberDot: color(h,  5, 100, 255),    // point fibre optique
-    fiberSnap:color(h, 32, 100, 255),    // point fibre optique – snap
+    bg:       color(h, 22,  96, 255),
+    board:    color(h, 52,  62, 153),
+    triA:     color(h, 45,  12, 140),    // triangle foncé    (sat 78→45, lum 18→12)
+    triB:     color(h, 55,   6, 140),    // triangle très foncé (sat 90→55, lum 10→6)
+    bar:      color(h, 42,  52, 153),
+    ivory:    color(h,  8,  97, 255),
+    ruby:     color(h, 45,  10, 255),    // fiche noire : sat 80→45, lum 16→10 (presque noir teinté)
+    offwhite: color(h, 12,  92, 255),
+    numColor: color(h, 90,  10, 255),    // numéros très foncés (16 → 10)
+    fiberDot: color(h,  5, 100, 255),
+    fiberSnap:color(h, 32, 100, 255),
   };
   colorMode(RGB, 255, 255, 255, 255);
 }
@@ -185,17 +191,33 @@ function windowResized() {
   rescaleDice();
 }
 
+// Helpers mirror : axe de symétrie horizontale = centre du plateau
+function mirrorX(x)   { return 2 * (bx + 6.5*a) - x; }
+function effMouseX()  { return mirrorMode ? mirrorX(mouseX) : mouseX; }
+
 // ── Boucle principale ─────────────────────────────────────────────────────────
 function draw() {
-  clear();   // canvas transparent → image CSS du body visible en dessous
+  clear();
+  // Zone "plateau" : flip horizontal en mirror (board + checkers + drag + off + flying)
+  push();
+  if (mirrorMode) {
+    translate(2 * (bx + 6.5*a), 0);
+    scale(-1, 1);
+  }
   drawBoard();
-  drawPointNumbers();
   drawCheckers();
   if (drag.active) {
     updateDragDisplay();
     drawDraggedChecker();
   }
+  drawFlyingChecker();
+  pop();
+
+  // Bearing off : toujours à droite (hors flip mirror) pour éviter les chevauchements
   drawOff();
+
+  // Hors flip (textes lisibles + UI) : positions ajustées via mirrorX si nécessaire
+  drawPointNumbers();
   updateDiceAnim();
   drawAllDice();
   drawPlayerInfo();
@@ -327,6 +349,8 @@ function drawModal() {
     };
 
   } else if (modalState.type === 'accept') {
+    // En mode IA, l'IA décide seule → ne pas afficher le modal côté user
+    if (aiMode && modalState.player === 'black') return;
     if (fontLarge) textFont(fontLarge);
     textSize(r * 0.9);
     text('Your opponent offers you a double', cx, cy - r * 2.2);
@@ -392,11 +416,15 @@ function updateDragDisplay() {
 
 // ── Plateau ───────────────────────────────────────────────────────────────────
 function drawBoard() {
-  // Fond tablier
+  // Fond tablier (sans contour)
+  noStroke();
   fill(C.board);
+  rect(bx, by, 13*a, 13*a);
+  // Contour entièrement à l'extérieur (offset = strokeWeight) pour ne pas chevaucher les fiches
+  noFill();
   stroke(C.ivory);
   strokeWeight(1.5);
-  rect(bx, by, 13*a, 13*a);
+  rect(bx - 0.75, by - 0.75, 13*a + 1.5, 13*a + 1.5);
 
   const targets = drag.active ? getValidTargets(drag.fromPt) : [];
 
@@ -491,14 +519,17 @@ function drawTri(x, baseY, pointUp, isDark, isTarget, isSnapped) {
 function ptCenterX(pt) {
   if (pt === 0) {
     if (!diceOnSide) {
-      // Portrait : fiches 0.4r×2r, gap r/2
-      const w = r*0.4, step = w + r/2;
+      // Portrait : aligné sur la prochaine fiche dans la pile bearing off (drawOffPortrait)
+      const w   = r * 0.4;
+      const gap = (r / 2) * 4/5;
+      const step = w + gap;
+      const x0  = bx + 13*a;   // bord droit de la 1ʳᵉ fiche au bord du plateau
       const idx = mockState.turn === 'white' ? mockState.off.white : mockState.off.black;
-      return bx + 13*a - r/2 - w - idx*step + w/2;   // centre du prochain slot
+      return x0 - w - idx * step + w / 2;
     }
     // Paysage : centre x du prochain slot
     const idx = mockState.turn === 'white' ? mockState.off.white : mockState.off.black;
-    return bx + 13*a + r + floor(idx/8)*(2*r + r/2) + r;   // ox + col*colW + w/2
+    return bx + 13*a + r + floor(idx/8)*(2*r + r/2) + r;
   }
   let lx;
   if      (pt >=  1 && pt <=  6) lx = bx + (13-pt)*a;
@@ -547,16 +578,26 @@ function drawCheckers() {
   for (let pt = 1; pt <= 24; pt++) {
     const val = mockState.points[pt];
     if (!val) continue;
-    const skipN = drag.active && drag.fromPt === pt ? (drag.numPieces || 1) : 0;
+    let skipN = drag.active && drag.fromPt === pt ? (drag.numPieces || 1) : 0;
+    if (flyingChecker && flyingChecker.from === pt) skipN = Math.max(skipN, 1);
+    // Pendant un hit : skip aussi la pièce mangée (elle est dessinée en fade out par drawFlyingChecker)
+    if (flyingChecker && flyingChecker.hit && flyingChecker.hit.pt === pt) {
+      skipN = Math.max(skipN, 1);
+    }
     drawStackOnPoint(pt, abs(val), val > 0, skipN);
   }
   const barCX = bx + 6.5*a;
   const skipWhiteBar = drag.active && drag.fromPt === 'bar' && mockState.turn === 'white';
   const skipBlackBar = drag.active && drag.fromPt === 'bar' && mockState.turn === 'black';
-  for (let i = 0; i < mockState.bar.white - (skipWhiteBar ? 1 : 0); i++)
+  const barIdx = drag.barIdx != null ? drag.barIdx : -1;
+  for (let i = 0; i < mockState.bar.white; i++) {
+    if (skipWhiteBar && i === barIdx) continue;
     drawChecker(barCX, by + 6.5*a - r - i*a, true, false);
-  for (let i = 0; i < mockState.bar.black - (skipBlackBar ? 1 : 0); i++)
+  }
+  for (let i = 0; i < mockState.bar.black; i++) {
+    if (skipBlackBar && i === barIdx) continue;
     drawChecker(barCX, by + 6.5*a + r + i*a, false, false);
+  }
 }
 
 function drawStackOnPoint(pt, count, isWhite, skipN) {
@@ -595,7 +636,93 @@ function drawCheckerLabel(cx, cy, isWhite, label) {
   fill(isWhite ? C.numColor : C.ivory);
   textAlign(CENTER, CENTER);
   textSize(r * 0.78);
-  text(label, cx, cy);
+  // En mirror le canvas est flippé horizontalement : on ré-flip localement le texte
+  if (mirrorMode) {
+    push();
+    translate(cx, cy);
+    scale(-1, 1);
+    text(label, 0, 0);
+    pop();
+  } else {
+    text(label, cx, cy);
+  }
+}
+
+// ── Animation parabolique d'un mouvement (IA / adversaire) ───────────────────
+function pieceXY(pt, isWhite) {
+  if (pt === 'bar') {
+    // Position du sommet de la pile bar (où se trouve la prochaine fiche à sortir)
+    const n      = isWhite ? mockState.bar.white : mockState.bar.black;
+    const stackN = Math.max(1, n);
+    const cy     = by + 6.5*a;
+    return isWhite
+      ? { x: bx + 6.5*a, y: cy - r - (stackN - 1) * a }
+      : { x: bx + 6.5*a, y: cy + r + (stackN - 1) * a };
+  }
+  if (pt === 0) {
+    if (diceOnSide) {
+      const cy = by + 6.5*a;
+      return isWhite
+        ? { x: bx + 13*a + 2*r, y: cy + r + 2 }
+        : { x: bx + 13*a + 2*r, y: cy - r - 2 };
+    }
+    return { x: bx + 13*a - r, y: isWhite ? by + 13*a + r*1.6 + r : by - r*1.6 - r };
+  }
+  return { x: ptCenterX(pt), y: ptTopY(pt) };
+}
+
+function startFlyingChecker(fromPt, toPt, isWhite, onDone, hit, diceValue, intermediatePts) {
+  const a0 = pieceXY(fromPt, isWhite);
+  const a1 = pieceXY(toPt,   isWhite);
+  // hit = { pt, isWhite } : pièce mangée à toPt (fade out simultané)
+  // diceValue = valeur du dé consommé (fade en sync avec l'anim)
+  // intermediatePts = liste des points intermédiaires d'un mouvement combiné (cercles vides)
+  const interms = (intermediatePts || []).map(pt => pieceXY(pt, isWhite));
+  flyingChecker = {
+    from: fromPt, to: toPt, isWhite,
+    fromX: a0.x, fromY: a0.y, toX: a1.x, toY: a1.y,
+    t0: millis(), dur: 900, onDone,
+    hit: hit || null,
+    diceValue: diceValue || null,
+    dicePlayer: isWhite ? 'white' : 'black',
+    intermediates: interms,
+  };
+}
+
+function drawFlyingChecker() {
+  if (!flyingChecker) return;
+  const fc = flyingChecker;
+  const elapsed = millis() - fc.t0;
+  if (elapsed >= fc.dur) {
+    const cb = fc.onDone;
+    flyingChecker = null;
+    if (cb) cb();
+    return;
+  }
+  // Animation : fade out (départ) + fade in (arrivée), courbe smoothstep pour subtilité
+  const t   = elapsed / fc.dur;
+  const ts  = t * t * (3 - 2 * t);
+  const col = fc.isWhite ? C.offwhite : C.ruby;
+  const cR  = red(col), cG = green(col), cB = blue(col);
+  noStroke();
+  fill(cR, cG, cB, Math.round(255 * (1 - ts)));
+  ellipse(fc.fromX, fc.fromY, 2*r, 2*r);
+  fill(cR, cG, cB, Math.round(255 * ts));
+  ellipse(fc.toX, fc.toY, 2*r, 2*r);
+  // Pièce mangée : fade out simultané à sa position
+  if (fc.hit) {
+    const hCol = fc.hit.isWhite ? C.offwhite : C.ruby;
+    const hPos = pieceXY(fc.hit.pt, fc.hit.isWhite);
+    fill(red(hCol), green(hCol), blue(hCol), Math.round(255 * (1 - ts)));
+    ellipse(hPos.x, hPos.y, 2*r, 2*r);
+  }
+  // Positions intermédiaires d'un mouvement combiné : cercles vides pour indiquer le passage
+  if (fc.intermediates && fc.intermediates.length > 0) {
+    noFill();
+    stroke(C.ivory);
+    strokeWeight(1);
+    for (const ip of fc.intermediates) ellipse(ip.x, ip.y, 2*r, 2*r);
+  }
 }
 
 // Pièce(s) en cours de drag — la fiche cliquée est au curseur, les autres suivent
@@ -671,6 +798,16 @@ function mousePressed() {
             if (typeof gameScore !== 'undefined') {
               gameScore.white = 0; gameScore.black = 0;
             }
+            // Bascule miroir + nouveau fond entre deux parties
+            mirrorMode = !mirrorMode;
+            const next = FOND_LIST[Math.floor(Math.random() * FOND_LIST.length)];
+            currentFond = next;
+            loadImage(currentFond, (img) => {
+              bgImage = img;
+              dominantHue = extractDominantHue(img);
+              buildPalette();
+              document.body.style.backgroundImage = `url('${currentFond}')`;
+            });
             startGame();
             inviteTarget = null;
           }
@@ -731,11 +868,14 @@ function mousePressed() {
     return;
   }
 
-  // R7 : clic sur le doubling cube du joueur courant
-  const cb = cubeBtns && cubeBtns[mockState.turn];
-  if (cb && dist(mouseX, mouseY, cb.x, cb.y) <= cb.r) {
-    clickCube(mockState.turn);
-    return;
+  // R7 : clic sur le doubling cube — n'importe quand, pour le LOCAL_PLAYER (et son adversaire en hot-seat)
+  for (const player of ['white', 'black']) {
+    if (aiMode && player !== LOCAL_PLAYER) continue;   // en IA, seul le joueur local clique
+    const cb = cubeBtns && cubeBtns[player];
+    if (cb && dist(mouseX, mouseY, cb.x, cb.y) <= cb.r) {
+      clickCube(player);
+      return;
+    }
   }
 
   if (isClickOnDiceZone(mouseX, mouseY, mockState.turn)) {
@@ -746,28 +886,38 @@ function mousePressed() {
     }
     return;
   }
+
+  // En mode IA, pendant le tour de l'IA → pas de drag possible (l'IA joue toute seule)
+  if (aiMode && mockState.turn !== LOCAL_PLAYER) return;
   // Fiches sur la barre (priorité : must move bar pieces first)
   const barCX = bx + 6.5*a;
   if (mockState.turn === 'white' && mockState.bar.white > 0) {
-    const barCY = by + 6.5*a - r - (mockState.bar.white - 1)*a;
-    if (dist(mouseX, mouseY, barCX, barCY) < r) {
-      drag.active = true; drag.fromPt = 'bar'; drag.numPieces = 1;
-      drag.mouseX = drag.dispX = mouseX;
-      drag.mouseY = drag.dispY = mouseY;
-      drag.snapPt = null;
-      return;
+    for (let bi = 0; bi < mockState.bar.white; bi++) {
+      const barCY = by + 6.5*a - r - bi*a;
+      if (dist(mouseX, mouseY, barCX, barCY) < r) {
+        drag.active = true; drag.fromPt = 'bar'; drag.numPieces = 1;
+        drag.barIdx = bi;     // index de la pièce prise (0 = sommet)
+        drag.mouseX = drag.dispX = mouseX;
+        drag.mouseY = drag.dispY = mouseY;
+        drag.snapPt = null;
+        return;
+      }
     }
   }
   if (mockState.turn === 'black' && mockState.bar.black > 0) {
-    const barCY = by + 6.5*a + r + (mockState.bar.black - 1)*a;
-    if (dist(mouseX, mouseY, barCX, barCY) < r) {
-      drag.active = true; drag.fromPt = 'bar'; drag.numPieces = 1;
-      drag.mouseX = drag.dispX = mouseX;
-      drag.mouseY = drag.dispY = mouseY;
-      drag.snapPt = null;
-      return;
+    for (let bi = 0; bi < mockState.bar.black; bi++) {
+      const barCY = by + 6.5*a + r + bi*a;
+      if (dist(mouseX, mouseY, barCX, barCY) < r) {
+        drag.active = true; drag.fromPt = 'bar'; drag.numPieces = 1;
+        drag.barIdx = bi;
+        drag.mouseX = drag.dispX = mouseX;
+        drag.mouseY = drag.dispY = mouseY;
+        drag.snapPt = null;
+        return;
+      }
     }
   }
+  const eMx = effMouseX();   // x logique (compense le flip mirror sur le board)
   for (let pt = 1; pt <= 24; pt++) {
     const val = mockState.points[pt];
     if (!val) continue;
@@ -778,17 +928,14 @@ function mousePressed() {
     const isBot      = pt <= 12;
     const visible    = min(stackCount, MAX_STACK);
 
-    // Détecte la fiche cliquée dans la pile (i=0 = bas/sommet plateau, i=visible-1 = top de la pile)
     let clickedIdx = -1;
     for (let i = 0; i < visible; i++) {
       const cy = isBot ? by + 13*a - r - i*a : by + r + i*a;
-      if (dist(mouseX, mouseY, cx, cy) < r) clickedIdx = i;
+      if (dist(eMx, mouseY, cx, cy) < r) clickedIdx = i;
     }
     if (clickedIdx < 0) continue;
 
-    // numTaken = nombre de fiches du dessus (incluse la cliquée)
     let numTaken = visible - clickedIdx;
-    // Multi-pickup uniquement sur les doubles ; capper aux dés restants
     if (gameMode && gameState && gameState.dice && gameState.dice.length === 4) {
       numTaken = min(numTaken, gameState.moves.length);
     } else {
@@ -796,33 +943,32 @@ function mousePressed() {
     }
     if (numTaken < 1) numTaken = 1;
 
-    drag.active   = true;
-    drag.fromPt   = pt;
+    drag.active    = true;
+    drag.fromPt    = pt;
     drag.numPieces = numTaken;
-    drag.mouseX   = drag.dispX = mouseX;
-    drag.mouseY   = drag.dispY = mouseY;
-    drag.snapPt   = null;
+    drag.mouseX    = drag.dispX = eMx;
+    drag.mouseY    = drag.dispY = mouseY;
+    drag.snapPt    = null;
     break;
   }
 }
 
 function mouseDragged() {
   if (!drag.active) return;
-  drag.mouseX = mouseX;
+  const eMx = effMouseX();
+  drag.mouseX = eMx;
   drag.mouseY = mouseY;
   drag.snapPt = null;
   for (const tpt of getValidTargets(drag.fromPt)) {
     if (tpt === 0) {
       if (diceOnSide) {
-        // Paysage : snap à droite du tablier
-        if (mouseX > bx + 13*a) { drag.snapPt = 0; break; }
+        if (eMx > bx + 13*a) { drag.snapPt = 0; break; }
       } else {
-        // Portrait : snap sous le plateau (blanc) ou au-dessus (noir)
         if (mockState.turn === 'white' && mouseY > by + 13*a - r) { drag.snapPt = 0; break; }
         if (mockState.turn === 'black' && mouseY < by + r)         { drag.snapPt = 0; break; }
       }
     } else {
-      if (abs(mouseX - ptCenterX(tpt)) <= a / 2) { drag.snapPt = tpt; break; }
+      if (abs(eMx - ptCenterX(tpt)) <= a / 2) { drag.snapPt = tpt; break; }
     }
   }
 }
@@ -904,22 +1050,27 @@ function drawOffPortrait(canBearOff) {
   const yB   = by - r*1.6 - h;
   const szN  = r * 1.4;        // même taille de référence que drawPlayerInfo
 
-  function drawOffStack(off, y, fillColor) {
+  function drawOffStack(off, y, fillColor, isWhiteSide) {
     const visible = Math.min(off, MAX_OFF_VIS);
     fill(fillColor); noStroke();
     for (let i = 0; i < visible; i++) rect(rx(i), y, w, h);
     if (off > MAX_OFF_VIS) {
       const overflow = off - MAX_OFF_VIS;
-      const labelRight = rx(MAX_OFF_VIS - 1) - r * 0.5;   // espacement avant la pile
-      textAlign(RIGHT, CENTER); noStroke();
-      textFont(fontLarge); textSize(szN * 0.8);
+      // Centre horizontal de la pile visible
+      const stackCx = (rx(0) + rx(MAX_OFF_VIS - 1)) / 2 + w / 2;
+      // Label sous la pile (white, en bas) ou au-dessus (black, en haut)
+      // → évite le chevauchement avec le drapeau RESIGN qui est sur la ligne du nom
+      const labelY = isWhiteSide ? y + h + r * 0.3 : y - r * 0.3;
+      const vAlign = isWhiteSide ? TOP : BOTTOM;
+      textAlign(CENTER, vAlign); noStroke();
+      textFont(fontLarge); textSize(szN * 0.7);
       fill(C.ivory);
-      text('+' + overflow, labelRight, y + h / 2);
+      text('+' + overflow, stackCx, labelY);
     }
   }
 
-  drawOffStack(mockState.off.white, yW, C.offwhite);
-  drawOffStack(mockState.off.black, yB, C.ruby);
+  drawOffStack(mockState.off.white, yW, C.offwhite, true);
+  drawOffStack(mockState.off.black, yB, C.ruby,     false);
 
   // Fantôme : seulement si la prochaine fiche reste dans la zone visible
   if (canBearOff) {
@@ -934,6 +1085,7 @@ function drawOffPortrait(canBearOff) {
 }
 
 // ── Numéros des points ────────────────────────────────────────────────────────
+// Dessinés HORS flip pour rester lisibles ; position x miroir si mirrorMode
 function drawPointNumbers() {
   textFont(fontSmall);
   textSize(r * 0.55);
@@ -942,7 +1094,9 @@ function drawPointNumbers() {
   fill(C.ivory);
   for (let pt = 1; pt <= 24; pt++) {
     const cy = pt <= 12 ? by + 13*a + r*0.8 : by - r*0.8;
-    text(pt, ptCenterX(pt), cy);
+    let cx = ptCenterX(pt);
+    if (mirrorMode) cx = mirrorX(cx);
+    text(pt, cx, cy);
   }
 }
 
@@ -1061,7 +1215,7 @@ function drawPlayerInfo() {
     if (gameMode && cubePromised === player) {
       fill(C.ivory);
       textFont(fontSmall); textSize(szP);
-      text(' / DOUBLE NEXT TURN', cx, y);
+      text(' / DOUBLE BEFORE YOU ROLL', cx, y);
     }
   }
 
@@ -1070,22 +1224,25 @@ function drawPlayerInfo() {
     const arrow = '\u21AA';
     const rect0 = '\u25AF';   // ▯ vide
     const rect1 = '\u25AE';   // ▮ plein
+    // Centre vertical = milieu visuel de la ligne PIP (mesuré en fontSmall)
+    textFont(fontSmall); textSize(sz);
+    const centerY = y + (textAscent() + textDescent()) / 2;
     textFont('Arial'); textSize(sz);
-    noStroke(); fill(C.ivory); textAlign(LEFT, TOP);
+    noStroke(); fill(C.ivory); textAlign(LEFT, CENTER);
     const arrowW = textWidth(arrow);
     const rectW  = textWidth(rect0);
     const totalW = arrowW + rectW;
+    const topY   = centerY - sz / 2;
     const isHover = mouseX >= x && mouseX <= x + totalW
-                 && mouseY >= y && mouseY <= y + sz;
-    text(arrow, x, y);
-    text(isHover ? rect1 : rect0, x + arrowW, y);
+                 && mouseY >= topY && mouseY <= topY + sz;
+    text(arrow, x, centerY);
+    text(isHover ? rect1 : rect0, x + arrowW, centerY);
     let cx = x + totalW;
-    if (isHover) {
-      textFont(fontSmall); textSize(sz);
-      text('  EXIT?', cx, y);
-      cx += textWidth('  EXIT?');
-    }
-    exitBtns.push({ x, y, w: totalW, h: sz });
+    // Réserve toujours la largeur du label EXIT? pour que le texte suivant ne saute pas
+    textFont(fontSmall); textSize(sz);
+    if (isHover) text('  EXIT?', cx, centerY);
+    cx += textWidth('  EXIT?');
+    exitBtns.push({ x, y: topY, w: totalW, h: sz });
     return cx;
   }
 
@@ -1177,8 +1334,11 @@ function drawNameAccessories(nameX, nameY, szN, player) {
   const cubeY = nameY + szN * 0.5;
   drawDoublingCube(cubeX, cubeY, cubeR, player, isCurrentTurn);
 
-  // ── Drapeau RESIGN (uniquement pour le joueur courant) ──
-  if (isCurrentTurn) {
+  // ── Drapeau RESIGN ──
+  // En mode IA : toujours visible côté LOCAL_PLAYER (peut abandonner à tout moment)
+  // En hot-seat : visible côté joueur courant uniquement
+  const showResign = aiMode ? (player === LOCAL_PLAYER) : isCurrentTurn;
+  if (showResign) {
     const flagX = cubeX + cubeR + r * 0.4;
     const flagY = nameY;
     const flagH = szN * 0.8;
@@ -1231,7 +1391,7 @@ function drawInfo() {
   noStroke();
   fill(C.ivory);
   const name = gameMode ? 'GAME' : (Object.keys(SCENARIOS).find(k => SCENARIOS[k] === mockState) || '?');
-  text(`[${name}] tour: ${mockState.turn}  dés: [${mockState.dice}]  fond: ${currentFond}${mirrorMode ? '  [MIRROR]' : ''}  — [1][2][3][4]  [5]=jeu réel  [b]=test barre  [m]=nouvelle partie`, 6, 4);
+  text(`[${name}${aiMode ? '+AI' : ''}] tour: ${mockState.turn}  dés: [${mockState.dice}]  fond: ${currentFond}${mirrorMode ? '  [MIRROR]' : ''}  — [1][2][3][4]  [5]=jeu réel  [i]=vs IA  [b]=test barre  [m]=nouvelle partie`, 6, 4);
 }
 
 // ── Touch (délègue aux handlers souris, return false bloque scroll/zoom) ─────
@@ -1245,7 +1405,8 @@ function keyPressed() {
   if (key === '2') { gameMode = false; mockState = SCENARIOS.midgame;    clearDice(); }
   if (key === '3') { gameMode = false; mockState = SCENARIOS.bearingOff; clearDice(); }
   if (key === '4') { gameMode = false; mockState = SCENARIOS.test1;      clearDice(); }
-  if (key === '5') { startGame(); }          // Mode jeu réel
-  if (key === 'b' || key === 'B') { startBarEntryTest(); } // Test barre
-  if (key === 'm' || key === 'M') { newMatch(); }          // Nouvelle partie
+  if (key === '5') { aiMode = false; startGame(); }              // Hot-seat
+  if (key === 'i' || key === 'I') { aiMode = true;  startGame(); } // vs IA (joue black)
+  if (key === 'b' || key === 'B') { startBarEntryTest(); }       // Test barre
+  if (key === 'm' || key === 'M') { newMatch(); }                // Nouvelle partie
 }
