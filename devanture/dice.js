@@ -239,9 +239,10 @@ function drawDiceForPlayer(player) {
       //  - joueur courant : carrés + pips selon animation et fade
       //  - joueur inactif : carrés en transparence (sans pips), toujours présents
       const isCurrent = (typeof mockState !== 'undefined') && mockState.turn === player;
-      // 2 états visuels seulement :
-      //   - Dé actif (joueur courant + dé non joué) : carré 100% + pips
-      //   - Dé inactif (joueur adverse OU dé déjà joué) : carré 50% sans pips
+      // États visuels :
+      //   - Joueur courant + dé non joué : carré 100% + pips 100%
+      //   - Joueur courant + dé joué : carré 50% + pips 50% (mémoire de la valeur)
+      //   - Joueur adverse : carré 50% sans pips
       if (!isCurrent) {
         if (typeof hasOwnedDice !== 'undefined' && !hasOwnedDice[player]) continue;
         drawAlpha = 0.5;
@@ -250,7 +251,16 @@ function drawDiceForPlayer(player) {
         const faded = isDieFaded(i, player);
         if (faded) {
           drawAlpha = 0.5;
-          pipsAlpha = 0;
+          pipsAlpha = 0.5;   // pips semi-transparents pour mémoire
+          if (show && diceAnim.dice[i]) {
+            pipsFromAnim = true;
+            if (typeof noMovesNotice !== 'undefined'
+                && noMovesNotice.active
+                && noMovesNotice.owner === player) {
+              pipsFromAnim = false;
+              pipsAlpha = 0;
+            }
+          }
         } else {
           drawAlpha = 1;
           if (show && diceAnim.dice[i]) {

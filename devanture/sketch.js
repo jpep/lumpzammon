@@ -101,11 +101,11 @@ function buildPalette() {
   C = {
     bg:       color(h, 22,  96, 255),
     board:    color(h, 52,  62, 153),
-    triA:     color(h, 45,  12, 140),    // triangle foncé    (sat 78→45, lum 18→12)
-    triB:     color(h, 55,   6, 140),    // triangle très foncé (sat 90→55, lum 10→6)
+    triA:     color(h, 45,  22, 140),    // triangle foncé    (lum 12→22)
+    triB:     color(h, 55,  14, 140),    // triangle très foncé (lum 6→14)
     bar:      color(h, 42,  52, 153),
     ivory:    color(h,  8,  97, 255),
-    ruby:     color(h, 45,  10, 255),    // fiche noire : sat 80→45, lum 16→10 (presque noir teinté)
+    ruby:     color(h, 45,  20, 255),    // fiche noire (lum 10→20, plus visible)
     offwhite: color(h, 12,  92, 255),
     numColor: color(h, 90,  10, 255),    // numéros très foncés (16 → 10)
     fiberDot: color(h,  5, 100, 255),
