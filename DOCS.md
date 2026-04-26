@@ -290,7 +290,7 @@ devanture/
 - **Resign flag** — `⚐ → ⚑` on the same line as the timer, just after `(M:SS)`. **Single click** opens the resign confirmation modal directly; the flag stays full (`⚑`) while the modal is up. Resign always counts as a simple loss × `cubeValue`. The flag stays pinned to the resigner after game over.
 - **Game-over overlay** — black veil + `GAME OVER`, winner name, win type (`SIMPLE / GAMMON / BACKGAMMON / RESIGN`), and points added (`× cubeValue`). Lines are evenly spaced (`2.7r` between centres) so the overlay reads cleanly even on small screens. Press `5` for a new game (score persists across the match).
 - **Session score** — `(N)` after the player name = games won this match. Multiplayer score is shown in superscript `⁽elo⁾` (placeholder = 0 until wired to Firebase).
-- **Player profile overlay** — click a player's **name** to open a profile overlay (everything outside the board darkens, board frame stays). Shows: name (large), `(session)` + `XX% 🥧 totalGames 📊 #RANK` line, `since YYYY-MM-DD`, then a recent-games table with three columns (`YOU (score)` / `OPPONENT (rank)` / `↑+N` blue-pastel or `↓-N` burgundy-petrol). Click anywhere or the EXIT button to close. Mock data lives in `PLAYER_PROFILES` in `adapter.js`. Ranks (7-tier ASCII-friendly): `ROOKIE` ≤ 50, `NOVICE` ≤ 150, `AMATEUR` ≤ 400, `SKILLED` ≤ 1000, `ADVANCED` ≤ 2500, `EXPERT` ≤ 5000, `MASTER` 5001+ (computed in `rankFromGames`).
+- **Player profile overlay** — click a player's **name** to open a profile overlay (everything outside the board darkens, board frame stays). Shows: name (large), `(±N)` cumulative multiplayer score + `XX% 🥧 totalGames 📊 #RANK` line, `since YYYY-MM-DD`, then a recent-games table with three columns (`YOU (score)` / `OPPONENT (rank)` / `↑+N` blue-pastel or `↓-N` burgundy-petrol). The cumulative score in parens is **derived from the recent-games table** via `getMultiplayerScore(player) = sum(recentGames.delta)` so it always matches what the user can see in the table; this same value is shown as the in-game superscript next to the player name. Click anywhere or the EXIT button to close. Mock data lives in `PLAYER_PROFILES` in `adapter.js`. Ranks (7-tier ASCII-friendly): `ROOKIE` ≤ 50, `NOVICE` ≤ 150, `AMATEUR` ≤ 400, `SKILLED` ≤ 1000, `ADVANCED` ≤ 2500, `EXPERT` ≤ 5000, `MASTER` 5001+ (computed in `rankFromGames`).
 - **Multi-pickup for doubles** — clicking a piece below the top of a stack picks up that piece + all the ones above. With doubles, each piece can use multiple dice (`k = floor(diceLeft / N)`), so a `1-1` lets you move 2 pieces from `5` directly to `3`.
 - **Auto-pass with empty dice** — when the current player has no legal moves, the dice are shown as empty frames at 25% opacity for 1.2s, then the turn passes automatically.
 - **Exit to room** — `→ ⁰ → → ⁰` (right arrow + door, both glyphs from `nortechico-100`, door scaled to ~82.5% and bottom-aligned). Single button anchored at the canvas bottom: **centred** in portrait, **bottom-right** at `r/2` from edges in landscape. Visible during play, in the lobby and during game-over. Click closes the profile overlay if open, opens `Quit current game?` during play, or goes straight to room after game over.
@@ -308,3 +308,16 @@ devanture/
 ### Multiplayer hook
 
 `getMultiplayerScore(player)` is referenced from `drawNameLeft` but not implemented yet — when wired, it should return the player's ELO from Firebase. The `LOCAL_PLAYER` constant (default `'white'`) controls which side shows the resign flag and exit button; this will become dynamic per session on integration.
+
+### Sign-in (nickname)
+
+A minimal sign-in step gates the skin on first launch:
+
+- `appState = 'signin'` is entered when no nickname is found in `localStorage`.
+- The key is `'bg:nick'` — **the same key used by jpep's `MenuScreen` / `saveNick()` / `loadNick()`** (`app/src/storage/local.js`). On integration the user won't need to re-enter their nickname.
+- The overlay shows the board frame with `CHOOSE YOUR NICKNAME` and an HTML `<input>` overlay (so the native mobile keyboard appears). Submission via `Enter`, click anywhere or tap the `[ENTER] OR TAP HERE` hint.
+- Submitted value is uppercased, trimmed, length-capped at 16, written to `localStorage`, and propagated everywhere via `applyUserNick(nick)`:
+  - `mockState.players.white = nick`
+  - `mockState.players.black = aiMode ? 'COMPUTER' : 'OPPONENT'`
+  - `PLAYER_PROFILES.white.name = nick`
+- **No identity verification yet** — uniqueness of the nickname (so each player has consistent stats) is by convention only. When wired to Firebase this should become a server-side check before `saveNick()`.

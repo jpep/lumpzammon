@@ -36,9 +36,16 @@ const MSG_SCALE = 1.3;
 // Heure de début d'affichage du notice "double promise" (pour le fade out après 3s)
 let doublePromiseT0 = null;
 
-// État global de l'app : 'game' (table de jeu) | 'room' (lobby) | 'waiting' (attente invitation)
+// État global de l'app : 'signin' (saisie nickname) | 'game' (table) | 'room' (lobby) | 'waiting'
 let appState   = 'game';
 let inviteTarget = null;
+
+// Nickname utilisateur (clé localStorage 'bg:nick' partagée avec le repo jpep)
+// Pas de vérification d'identité : on prend tel quel ce que l'utilisateur saisit.
+// L'unicité (pour rattacher les stats) est supposée respectée par convention pour l'instant.
+const NICK_STORAGE_KEY = 'bg:nick';
+let userNick = null;            // nickname courant (string ou null si pas encore saisi)
+let signinInputEl = null;       // <input> HTML overlay pour la saisie
 
 // Liste mockée de joueurs dans le room (à brancher sur le multijoueur jpep)
 const ROOM_PLAYERS = [
@@ -184,6 +191,29 @@ function setup() {
   dominantHue = extractDominantHue(bgImage);
   buildPalette();
   document.body.style.backgroundImage = `url('${currentFond}')`;
+
+  // Lecture du nickname (clé partagée avec jpep) — sinon on bascule en sign-in
+  try { userNick = localStorage.getItem(NICK_STORAGE_KEY); }
+  catch (e) { userNick = null; }
+  if (!userNick) {
+    appState = 'signin';
+  } else {
+    applyUserNick(userNick);
+  }
+}
+
+// Propage le nickname à mockState (et à PLAYER_PROFILES si présent) pour que
+// le LOCAL_PLAYER ('white' par convention) soit affiché partout avec ce nom.
+function applyUserNick(nick) {
+  userNick = nick;
+  if (typeof mockState !== 'undefined' && mockState && mockState.players) {
+    mockState.players.white = nick;
+    mockState.players.black = aiMode ? 'COMPUTER' : (mockState.players.black || 'OPPONENT');
+  }
+  // Met à jour le profil joueur local (si présent) avec le nickname
+  if (typeof PLAYER_PROFILES !== 'undefined' && PLAYER_PROFILES.white) {
+    PLAYER_PROFILES.white.name = nick;
+  }
 }
 
 // ── Nouvelle partie : random fond + bascule miroir ────────────────────────────
@@ -252,6 +282,96 @@ function draw() {
   drawPlayerProfile();   // overlay profil joueur (clic sur nom)
   // EXIT en dernier pour qu'il soit toujours visible (room, game-over, jeu, overlay profil)
   drawExitButton();
+  // Sign-in en couvre-tout — dessiné en dernier pour être au-dessus
+  if (appState === 'signin') drawSignin();
+  else if (signinInputEl) destroySigninInput();
+}
+
+// ── Sign-in : saisie du nickname (clé localStorage 'bg:nick' partagée jpep) ──
+// Pas d'authentification réelle ; on prend la chaîne saisie telle quelle.
+// Utilise un <input> HTML overlay pour bénéficier du clavier mobile natif.
+function drawSignin() {
+  // Voile sombre couvrant tout
+  noStroke(); fill(0, 0, 0, 220);
+  rect(0, 0, windowWidth, windowHeight);
+
+  // Cadre = rectangle du plateau
+  noFill(); stroke(C.ivory); strokeWeight(1.5);
+  rect(bx, by, 13*a, 13*a);
+
+  // Titre + sous-titre
+  noStroke(); fill(C.ivory);
+  textAlign(CENTER, CENTER);
+  if (fontLarge) textFont(fontLarge);
+  textSize(r * 1.4 * MSG_SCALE);
+  text('CHOOSE YOUR NICKNAME', windowWidth / 2, by + 13*a * 0.32);
+
+  textFont(fontSmall); textSize(r * 0.7 * MSG_SCALE);
+  fill(red(C.ivory), green(C.ivory), blue(C.ivory), 180);
+  text('USED TO IDENTIFY YOU AND TRACK YOUR STATS', windowWidth / 2, by + 13*a * 0.32 + r * 1.6);
+
+  // Crée l'input HTML s'il n'existe pas encore (focus auto)
+  if (!signinInputEl) createSigninInput();
+  positionSigninInput();
+}
+
+function createSigninInput() {
+  signinInputEl = document.createElement('input');
+  signinInputEl.type = 'text';
+  signinInputEl.maxLength = 16;
+  signinInputEl.autocomplete = 'off';
+  signinInputEl.autocapitalize = 'characters';
+  signinInputEl.spellcheck = false;
+  signinInputEl.placeholder = 'YOUR NICKNAME';
+  signinInputEl.style.position    = 'absolute';
+  signinInputEl.style.background  = 'transparent';
+  signinInputEl.style.color       = '#f3ecdf';
+  signinInputEl.style.border      = 'none';
+  signinInputEl.style.borderBottom= '2px solid #f3ecdf';
+  signinInputEl.style.outline     = 'none';
+  signinInputEl.style.textAlign   = 'center';
+  signinInputEl.style.textTransform = 'uppercase';
+  signinInputEl.style.letterSpacing = '0.05em';
+  signinInputEl.style.fontFamily  = 'monospace';
+  signinInputEl.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); submitSignin(); }
+  });
+  document.body.appendChild(signinInputEl);
+  setTimeout(() => signinInputEl && signinInputEl.focus(), 50);
+}
+
+function positionSigninInput() {
+  if (!signinInputEl) return;
+  const w = 13*a * 0.55;
+  const h = r * 2.0;
+  signinInputEl.style.left   = `${(windowWidth - w) / 2}px`;
+  signinInputEl.style.top    = `${by + 13*a * 0.50}px`;
+  signinInputEl.style.width  = `${w}px`;
+  signinInputEl.style.height = `${h}px`;
+  signinInputEl.style.fontSize = `${Math.round(r * 1.0 * MSG_SCALE)}px`;
+
+  // Bouton ENTER dessiné en canvas (clic / Enter clavier déclenchent submitSignin)
+  noStroke(); fill(C.ivory);
+  textAlign(CENTER, CENTER); textFont(fontSmall);
+  textSize(r * 0.85 * MSG_SCALE);
+  text('[ENTER] OR TAP HERE', windowWidth / 2, by + 13*a * 0.50 + h + r * 1.4);
+}
+
+function submitSignin() {
+  if (!signinInputEl) return;
+  const raw = (signinInputEl.value || '').trim().toUpperCase();
+  if (!raw) return;   // vide → ne rien faire
+  try { localStorage.setItem(NICK_STORAGE_KEY, raw); } catch (e) {}
+  applyUserNick(raw);
+  destroySigninInput();
+  appState = 'game';
+}
+
+function destroySigninInput() {
+  if (signinInputEl && signinInputEl.parentNode) {
+    signinInputEl.parentNode.removeChild(signinInputEl);
+  }
+  signinInputEl = null;
 }
 
 // ── Notice "double promise" : en bas de l'écran, fade out après 3s ───────────
@@ -453,17 +573,21 @@ function drawPlayerProfile() {
   text(baseName, innerX, yCur);
   yCur += szName * 1.1;
 
-  // ── Ligne 2 : (sessionScore) gros + XX% + 🥧 + total + 📊 + #RANK ─────────
+  // ── Ligne 2 : (mpScoreCumulé) gros + XX% + 🥧 + total + 📊 + #RANK ─────────
+  // Le score entre parenthèses correspond au cumul des deltas affichés dans
+  // le tableau (cohérence visuelle avec le superscript in-game). Si nul → (0).
   const szLine = r * 1.0;
-  const sessionScore = (typeof gameScore !== 'undefined') ? gameScore[player] : 0;
+  const mpScore = (typeof getMultiplayerScore === 'function')
+    ? getMultiplayerScore(player) : 0;
   const rank = rankFromGames(profile.totalGames);
   const winPct = Math.round(profile.winPercent * 100);
 
   textSize(szLine); textFont(fontLarge); fill(C.ivory);
   let lineX = innerX;
 
-  // Score session
-  const scoreStr = `(${sessionScore})`;
+  // Score multijoueur cumulé : (+N) si positif, (-N) si négatif, (0) si nul
+  const sign      = mpScore > 0 ? '+' : '';
+  const scoreStr  = `(${sign}${mpScore})`;
   text(scoreStr, lineX, yCur);
   lineX += textWidth(scoreStr) + r * 0.8;
 
@@ -1064,6 +1188,12 @@ function isPtAvailable(pt) {
 
 // ── Événements souris ─────────────────────────────────────────────────────────
 function mousePressed() {
+  // ── Sign-in : tap n'importe où soumet (l'input garde le focus pour le clavier mobile) ──
+  if (appState === 'signin') {
+    submitSignin();
+    return;
+  }
+
   // ── Room (lobby) : click sur joueur disponible → invitation + accept auto (mock) ──
   if (appState === 'room') {
     // EXIT : retour au jeu (ou état neutre si aucune partie en cours)
@@ -1582,13 +1712,16 @@ function drawPlayerInfo() {
     text(baseName, cx, y);
     cx += textWidth(baseName);
 
-    // Superscript : score multijoueur
+    // Superscript : score multijoueur cumulé (somme des deltas du tableau profil)
+    // Cohérent avec l'affichage entre parenthèses dans le profil joueur.
     const mpScore = (typeof getMultiplayerScore === 'function')
       ? getMultiplayerScore(player) : 0;
+    const mpSign  = mpScore > 0 ? '+' : '';
+    const mpStr   = `(${mpSign}${mpScore})`;
     cx += szN * 0.08;
     textSize(szN * 0.45);
-    text(`(${mpScore})`, cx, y);
-    cx += textWidth(`(${mpScore})`);
+    text(mpStr, cx, y);
+    cx += textWidth(mpStr);
 
     // Score session (taille normale)
     textSize(szN);

@@ -72,6 +72,16 @@ const PLAYER_PROFILES = {
   },
 };
 
+// Score multijoueur (superscript in-game + parenthèses dans le profil) :
+// somme des deltas des dernières parties — par cohérence avec le tableau affiché.
+// Sur intégration jpep : remplacer par le vrai score cumulé Firebase.
+function getMultiplayerScore(player) {
+  if (typeof PLAYER_PROFILES === 'undefined') return 0;
+  const p = PLAYER_PROFILES[player];
+  if (!p || !p.recentGames) return 0;
+  return p.recentGames.reduce((s, g) => s + (g.delta || 0), 0);
+}
+
 // Rangs ASCII-friendly (7 paliers) — affichés avec '#' devant.
 //   0-50      = ROOKIE
 //   51-150    = NOVICE
@@ -532,7 +542,10 @@ function startGame() {
     turn:    'white',
     dice:    [],
     phase:   'normal',
-    players: { white: 'WHITE', black: 'BLACK' },
+    players: {
+      white: (typeof userNick !== 'undefined' && userNick) ? userNick : 'WHITE',
+      black: aiMode ? 'COMPUTER' : 'OPPONENT',
+    },
     timers:  null,
   };
   // Affiche les fiches dès le départ (avant la séquence d'opening roll qui dure ~6.6s)
@@ -651,7 +664,10 @@ function startBarEntryTest() {
     turn:    'white',
     dice:    [],
     phase:   'normal',
-    players: { white: 'WHITE', black: 'BLACK' },
+    players: {
+      white: (typeof userNick !== 'undefined' && userNick) ? userNick : 'WHITE',
+      black: aiMode ? 'COMPUTER' : 'OPPONENT',
+    },
     timers:  null,
   };
 
