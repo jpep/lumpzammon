@@ -29,7 +29,10 @@ const PIP_LAYOUTS = {
 let diceAnim = { state:DS.EMPTY, owner:'white', frame:0, values:[0,0], dice:[null,null] };
 
 // ── Position des dés ──────────────────────────────────────────────────────────
-function dieSize() { return 3 * r; }
+// 3.5r : laisse une marge optique sous le bloc nom+pip line (~3.2r) tout en
+// gardant le top du nom aligné sur le bord supérieur du dé.
+// Le superscript ⁽elo⁾ peut déborder un peu au-dessus, c'est accepté.
+function dieSize() { return 3.5 * r; }
 
 function getDiePos(player, dieIdx) {
   const ds = dieSize();   // 3r = 1.5a

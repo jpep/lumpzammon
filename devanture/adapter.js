@@ -39,6 +39,57 @@ let timerState = {
 };
 let _timerInterval = null;
 
+// ── Profils joueurs (mock) ───────────────────────────────────────────────────
+// Données affichées dans l'overlay profil (clic sur un nom de joueur).
+// Le rang est dérivé du nombre total de parties via rankFromGames().
+const PLAYER_PROFILES = {
+  white: {
+    winPercent: 0.62,
+    totalGames: 234,
+    firstPlay:  '2024-03-15',
+    // Adversaires variés : un panel réaliste (pas la même personne tout le temps)
+    recentGames: [
+      { youScore: 4, opponent: 'NIA',     oppRank: 'AMATEUR',  delta:  +2 },
+      { youScore: 1, opponent: 'KAI',     oppRank: 'NOVICE',   delta:  -1 },
+      { youScore: 8, opponent: 'OMAR',    oppRank: 'AMATEUR',  delta:  +4 },
+      { youScore: 3, opponent: 'LUNA',    oppRank: 'SKILLED',  delta:  -2 },
+      { youScore: 5, opponent: 'ROCCO',   oppRank: 'NOVICE',   delta:  +1 },
+      { youScore: 2, opponent: 'PRIYA',   oppRank: 'ROOKIE',   delta:  -1 },
+    ],
+  },
+  black: {
+    winPercent: 0.71,
+    totalGames: 1456,
+    firstPlay:  '2022-11-08',
+    recentGames: [
+      { youScore: 8, opponent: 'AKEMI',   oppRank: 'AMATEUR',  delta:  +4 },
+      { youScore: 5, opponent: 'JAVIER',  oppRank: 'SKILLED',  delta:  +2 },
+      { youScore: 1, opponent: 'AURELIE', oppRank: 'MASTER',   delta:  -3 },
+      { youScore: 6, opponent: 'TARO',    oppRank: 'AMATEUR',  delta:  +2 },
+      { youScore: 2, opponent: 'INDRA',   oppRank: 'ADVANCED', delta:  -1 },
+      { youScore: 4, opponent: 'YANA',    oppRank: 'EXPERT',   delta:  +1 },
+    ],
+  },
+};
+
+// Rangs ASCII-friendly (7 paliers) — affichés avec '#' devant.
+//   0-50      = ROOKIE
+//   51-150    = NOVICE
+//   151-400   = AMATEUR
+//   401-1000  = SKILLED
+//   1001-2500 = ADVANCED
+//   2501-5000 = EXPERT
+//   5001+     = MASTER
+function rankFromGames(n) {
+  if (n <= 50)   return 'ROOKIE';
+  if (n <= 150)  return 'NOVICE';
+  if (n <= 400)  return 'AMATEUR';
+  if (n <= 1000) return 'SKILLED';
+  if (n <= 2500) return 'ADVANCED';
+  if (n <= 5000) return 'EXPERT';
+  return 'MASTER';
+}
+
 // ── Sync : met mockState à jour depuis gameState ──────────────────────────────
 function syncMockState() {
   if (!gameState) return;
@@ -388,10 +439,17 @@ function resign(player) {
 function clickCube(player) {
   if (!gameMode || gameWinner || modalState) return;
   if (cubeValue >= 4) return;
-  if (cubePromised) return;
+  // Si l'adversaire a déjà promis → bloqué (chacun son cube)
+  if (cubePromised && cubePromised !== player) return;
   // Règle backgammon : seul le possesseur du cube peut le doubler (cubeOwner=null → libre)
   if (cubeOwner !== null && cubeOwner !== player) return;
   cubePromised = player;
+  // Reset du timer du notice "YOU WILL BE ABLE TO DOUBLE…" :
+  // chaque clic (initial OU rappel) relance l'affichage à pleine opacité
+  // pour bien rappeler au joueur qu'il faut attendre son tour.
+  if (typeof doublePromiseT0 !== 'undefined') {
+    doublePromiseT0 = (typeof millis === 'function') ? millis() : Date.now();
+  }
 }
 
 function modalOfferResponse(accept) {
@@ -539,7 +597,7 @@ function startGame() {
           startTurnTimer();
           if (aiMode && resolved.turn === 2) waitForDiceThenAITurn();
         }, 400);
-      }, 1400);
+      }, 1100);
     }, 2200);
   }, 2200);
 }

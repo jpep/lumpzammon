@@ -15,13 +15,26 @@ let cubeBtns  = { white: null, black: null };
 let modalBtns = null;    // { yes, no, accept, decline, cancel }
 let exitBtns  = [];      // zones cliquables précises (au lieu d'un seul gros rectangle)
 let roomBtns  = [];      // [{ x, y, w, h, player }]
+let nameBtns   = { white: null, black: null };  // zones cliquables sur le nom (overlay profil)
 let nameBlockW = { white: 0, black: 0 };
+
+// Overlay profil joueur : null (fermé) ou 'white'|'black' (ouvert sur ce joueur)
+let profileOverlay = null;
 
 // Animation d'un mouvement (trajectoire parabolique) — visualisation pour IA / adversaire
 let flyingChecker = null;   // { from, to, isWhite, fromX, fromY, toX, toY, t0, dur, onDone }
 
 // Joueur local (l'utilisateur sur cet écran) — par défaut blanc pour les tests
 const LOCAL_PLAYER = 'white';
+
+// État "armé" du drapeau resign : true après un 1er click (compat tactile sans hover)
+let resignArmed = false;
+
+// Échelle des messages (modaux + overlays) — agrandi pour la lisibilité mobile
+const MSG_SCALE = 1.3;
+
+// Heure de début d'affichage du notice "double promise" (pour le fade out après 3s)
+let doublePromiseT0 = null;
 
 // État global de l'app : 'game' (table de jeu) | 'room' (lobby) | 'waiting' (attente invitation)
 let appState   = 'game';
@@ -110,6 +123,11 @@ function buildPalette() {
     numColor: color(h, 90,  10, 255),    // numéros très foncés (16 → 10)
     fiberDot: color(h,  5, 100, 255),
     fiberSnap:color(h, 32, 100, 255),
+    // Couleurs deltas profil joueur :
+    // gainBlue : bleu pastel un peu désaturé pour les +points (victoires)
+    // lossRed  : rouge bordeaux/pétrole pour les −points (défaites)
+    gainBlue: color(210, 35, 78, 255),
+    lossRed:  color(355, 55, 50, 255),
   };
   colorMode(RGB, 255, 255, 255, 255);
 }
@@ -124,7 +142,7 @@ let drag = {
 };
 
 // ── Géométrie responsive ──────────────────────────────────────────────────────
-const NAMES_W_A = 8;   // largeur réservée à droite (a-units) pour nom + super + score + cube + drapeau + RESIGN?
+const NAMES_W_A = 7;   // largeur réservée à droite (a-units) pour nom + super + score + cube + drapeau + RESIGN?
 
 function computeGeometry() {
   diceOnSide = windowWidth >= windowHeight * 1.1;   // paysage → dés à gauche
@@ -142,16 +160,20 @@ function computeGeometry() {
     bx = (windowWidth  - 13*a) / 2;
     by = (windowHeight - 13*a) / 2;
   } else {
-    // Dés au-dessus (noir) et en-dessous (blanc)
-    // Numéros à r*0.8 du bord ; dés à r*0.8 des numéros → r*1.6 du bord
-    // Espace vertical : (r*1.6 + ds) × 2 + 13a = 9.2r + 26r = 35.2r
-    const maxH = (windowHeight - 2 * MARGIN) * 26 / 35.2;
+    // Dés au-dessus (noir) et en-dessous (blanc).
+    // Bloc texte = 2 lignes (szN + gap + szP = 3.5r) → même hauteur que les dés.
+    // Le tout (dé+gap+plateau+gap+dé) est centré verticalement dans la fenêtre.
+    const maxH = (windowHeight - 2 * MARGIN) * 26 / 39.5;
     const maxW = windowWidth  - 2 * MARGIN;
     const side = min(maxW, maxH);
     a  = side / 13;
     r  = a / 2;
     bx = (windowWidth  - 13*a) / 2;
-    by = (windowHeight - 13*a) / 2;
+    // Centrage vertical : block vertical = dé(3.5r) + gap(r*1.6) + plateau(13a) + gap(r*1.6) + dé(3.5r)
+    const block  = dieSize() + r * 1.6;          // 5.1r de chaque côté
+    const totalH = 2 * block + 13 * a;
+    const vide   = max(0, windowHeight - totalH);
+    by = vide / 2 + block;
   }
 }
 
@@ -222,16 +244,107 @@ function draw() {
   drawAllDice();
   drawPlayerInfo();
   drawInfo();
-  drawExitButton();
+  drawDoublePromiseNotice();
   drawModal();
   if (gameMode && gameWinner) drawGameOver();
   if (appState === 'room')    drawRoom();
   if (appState === 'waiting') drawWaiting();
+  drawPlayerProfile();   // overlay profil joueur (clic sur nom)
+  // EXIT en dernier pour qu'il soit toujours visible (room, game-over, jeu, overlay profil)
+  drawExitButton();
 }
 
-// ↪▯ exit est dessiné inline dans drawSecondLine (portrait) ou
-// drawExitUnderPip (paysage). Plus rien à faire ici.
-function drawExitButton() { /* no-op */ }
+// ── Notice "double promise" : en bas de l'écran, fade out après 3s ───────────
+function drawDoublePromiseNotice() {
+  if (!gameMode || typeof cubePromised === 'undefined' || !cubePromised) {
+    doublePromiseT0 = null;
+    return;
+  }
+  if (aiMode && cubePromised !== LOCAL_PLAYER) return;   // chez l'IA : invisible
+
+  if (doublePromiseT0 === null) doublePromiseT0 = millis();
+  const elapsed   = millis() - doublePromiseT0;
+  const fadeStart = 3000;
+  const fadeDur   = 2000;
+  let alpha = 1;
+  if (elapsed > fadeStart) {
+    alpha = 1 - (elapsed - fadeStart) / fadeDur;
+    if (alpha <= 0) return;
+  }
+
+  // Position : centré entre le bord inférieur des dés joueur bas et le haut du bouton EXIT
+  // (évite le chevauchement avec le pictogramme EXIT)
+  const cx = windowWidth / 2;
+  let cy;
+  const exitH = r * 1.4;
+  const exitTopY = windowHeight - r/2 - exitH;
+  if (diceOnSide) {
+    // Paysage : entre bas du plateau et haut du bouton EXIT
+    cy = (by + 13*a + exitTopY) / 2;
+  } else {
+    // Portrait : entre bas du bloc dés/texte joueur blanc et haut du bouton EXIT
+    const textBottomY = by + 13*a + r*1.6 + dieSize();
+    cy = (textBottomY + exitTopY) / 2;
+  }
+  noStroke();
+  fill(red(C.ivory), green(C.ivory), blue(C.ivory), Math.round(255 * alpha));
+  textAlign(CENTER, CENTER);
+  textFont(fontSmall); textSize(r * 0.95 * MSG_SCALE);
+  text('YOU WILL BE ABLE TO DOUBLE BEFORE YOU ROLL.', cx, cy);
+}
+
+// ↪▯ EXIT — bouton global en bas de l'écran
+//  - Portrait : centré, à r/2 du bord bas
+//  - Paysage  : aligné à droite, à r/2 des bords droit et bas
+function drawExitButton() {
+  // Visible en jeu, en game-over et dans le lobby (room).
+  // Caché uniquement pendant l'écran "waiting" ou un modal actif.
+  if (appState === 'waiting') return;
+  if (modalState && !(gameMode && gameWinner)) return;
+
+  const arrow = '→';   // → RIGHTWARDS ARROW
+  const rect0 = '⁰';   // ⁰ porte (U+2070 SUPERSCRIPT ZERO — rendu rectangulaire en nortechico)
+  const rect1 = '⁰';   // même glyphe ; hover identique pour l'instant
+  const sz    = r * 1.4;             // taille flèche
+  const szRct = sz * 0.825;          // porte ≈ 82.5 % de la flèche (80-85 %)
+
+  // Tout en nortechico-100 (typo référence)
+  textAlign(LEFT, TOP);
+  if (fontLarge) textFont(fontLarge);
+
+  // Mesures
+  textSize(sz);
+  const arrowW = textWidth(arrow);
+  textSize(szRct);
+  const rectW  = textWidth(rect0);
+  const gap    = sz * 0.15;             // léger espacement entre flèche et porte
+  const totalW = arrowW + gap + rectW;
+
+  let x, y;
+  if (diceOnSide) {
+    // Paysage : bas-droite, r/2 des bords
+    x = windowWidth  - r/2 - totalW;
+    y = windowHeight - r/2 - sz;
+  } else {
+    // Portrait : centré, r/2 du bord bas
+    x = (windowWidth - totalW) / 2;
+    y = windowHeight - r/2 - sz;
+  }
+
+  const isHover = mouseX >= x && mouseX <= x + totalW
+               && mouseY >= y && mouseY <= y + sz;
+
+  noStroke(); fill(C.ivory);
+  // Flèche
+  textSize(sz);
+  text(arrow, x, y);
+  // Porte (réduite, alignée verticalement au bas de la flèche)
+  textSize(szRct);
+  const rectY = y + (sz - szRct);     // bas-aligné sur la flèche
+  text(isHover ? rect1 : rect0, x + arrowW + gap, rectY);
+
+  exitBtns.push({ x, y, w: totalW, h: sz });
+}
 
 // ── Lobby (Room) — liste des joueurs disponibles ─────────────────────────────
 function drawRoom() {
@@ -246,16 +359,16 @@ function drawRoom() {
   noStroke(); fill(C.ivory);
   textAlign(CENTER, TOP);
   if (fontLarge) textFont(fontLarge);
-  textSize(r * 1.6);
+  textSize(r * 1.6 * MSG_SCALE);
   text('ROOM', bx + 13*a/2, by + r * 0.8);
 
   // Sous-titre
-  textFont(fontSmall); textSize(r * 0.7);
+  textFont(fontSmall); textSize(r * 0.7 * MSG_SCALE);
   text('CLICK A PLAYER TO INVITE', bx + 13*a/2, by + r * 3.2);
 
   // Liste joueurs (centrée verticalement dans le cadre)
   roomBtns = [];
-  textAlign(LEFT, CENTER); textFont(fontLarge); textSize(r * 1.0);
+  textAlign(LEFT, CENTER); textFont(fontLarge); textSize(r * 1.0 * MSG_SCALE);
   const startY = by + r * 5.5;
   const lineH  = r * 1.6;
   const colX   = bx + 2*a;
@@ -278,9 +391,9 @@ function drawRoom() {
     text(p.name, colX + r, ly);
 
     // Tag à droite
-    textAlign(RIGHT, CENTER); textFont(fontSmall); textSize(r * 0.6);
+    textAlign(RIGHT, CENTER); textFont(fontSmall); textSize(r * 0.6 * MSG_SCALE);
     text(tag, colX + colW, ly);
-    textAlign(LEFT, CENTER); textFont(fontLarge); textSize(r * 1.0);
+    textAlign(LEFT, CENTER); textFont(fontLarge); textSize(r * 1.0 * MSG_SCALE);
 
     if (clickable) {
       roomBtns.push({ x: colX, y: ly - r*0.8, w: colW, h: r * 1.4, player: p });
@@ -297,12 +410,162 @@ function drawWaiting() {
   const cy = windowHeight / 2;
   fill(255); textAlign(CENTER, CENTER);
   if (fontLarge) textFont(fontLarge);
-  textSize(r * 1.1);
+  textSize(r * 1.1 * MSG_SCALE);
   text(`Waiting for ${inviteTarget ? inviteTarget.name : '...'}`, cx, cy - r * 1.4);
 
-  textSize(r * 0.7);
+  textSize(r * 0.7 * MSG_SCALE);
   text('CANCEL', cx, cy + r * 0.8);
-  modalBtns = { cancel: { cx, cy: cy + r * 0.8, hw: r * 1.6, hh: r * 0.9 } };
+  modalBtns = { cancel: { cx, cy: cy + r * 0.8, hw: r * 1.6 * MSG_SCALE, hh: r * 0.9 * MSG_SCALE } };
+}
+
+// ── Overlay profil joueur ─────────────────────────────────────────────────────
+// Fond assombri en dehors du plateau, contenu profil dans le rectangle du plateau.
+// Ouvert via clic sur le nom d'un joueur ; fermé via le bouton EXIT.
+function drawPlayerProfile() {
+  if (!profileOverlay) return;
+  if (typeof PLAYER_PROFILES === 'undefined') return;
+  const player  = profileOverlay;
+  const profile = PLAYER_PROFILES[player];
+  if (!profile) return;
+
+  // Voile sombre couvrant tout l'écran (le plateau dessous reste légèrement visible)
+  noStroke(); fill(0, 0, 0, 210);
+  rect(0, 0, windowWidth, windowHeight);
+
+  // Cadre = rectangle du plateau (comme drawRoom)
+  noFill(); stroke(C.ivory); strokeWeight(1.5);
+  rect(bx, by, 13*a, 13*a);
+
+  // ── Nom (gros, en haut) ────────────────────────────────────────────────────
+  noStroke(); fill(C.ivory);
+  if (fontLarge) textFont(fontLarge);
+  textAlign(LEFT, TOP);
+  const padX  = r * 1.2;          // marge interne gauche
+  const padY  = r * 0.8;          // marge interne haute
+  const innerX = bx + padX;
+  const innerW = 13*a - 2*padX;
+  let yCur     = by + padY;
+
+  const baseName = (mockState.players && mockState.players[player])
+                || (player === 'white' ? 'WHITE' : 'BLACK');
+  const szName  = r * 2.4;
+  textSize(szName);
+  text(baseName, innerX, yCur);
+  yCur += szName * 1.1;
+
+  // ── Ligne 2 : (sessionScore) gros + XX% + 🥧 + total + 📊 + #RANK ─────────
+  const szLine = r * 1.0;
+  const sessionScore = (typeof gameScore !== 'undefined') ? gameScore[player] : 0;
+  const rank = rankFromGames(profile.totalGames);
+  const winPct = Math.round(profile.winPercent * 100);
+
+  textSize(szLine); textFont(fontLarge); fill(C.ivory);
+  let lineX = innerX;
+
+  // Score session
+  const scoreStr = `(${sessionScore})`;
+  text(scoreStr, lineX, yCur);
+  lineX += textWidth(scoreStr) + r * 0.8;
+
+  // Pourcentage XX%
+  const pctStr = `${winPct}%`;
+  text(pctStr, lineX, yCur);
+  lineX += textWidth(pctStr) + r * 0.25;
+
+  // Pictogramme tarte (camembert) — juste la part pleine, pas de cercle vide
+  const pieR = szLine * 0.45;     // rayon = ~45 % de la hauteur ligne
+  const pieCX = lineX + pieR;
+  const pieCY = yCur + szLine * 0.5;
+  drawPiePicto(pieCX, pieCY, pieR, profile.winPercent);
+  lineX += pieR * 2 + r * 0.5;
+
+  // Nombre total de parties
+  const totalStr = String(profile.totalGames);
+  text(totalStr, lineX, yCur);
+  lineX += textWidth(totalStr) + r * 0.8;
+
+  // Pictogramme podium (3 barres décroissantes)
+  const podW = szLine * 0.95;
+  const podH = szLine * 0.85;
+  drawPodiumPicto(lineX, yCur + (szLine - podH), podW, podH);
+  lineX += podW + r * 0.3;
+
+  // # + nom du rang
+  const rankStr = `#${rank}`;
+  text(rankStr, lineX, yCur);
+
+  yCur += szLine * 1.6;
+
+  // ── Date du premier jeu ────────────────────────────────────────────────────
+  textFont(fontSmall); textSize(szLine * 0.75);
+  fill(red(C.ivory), green(C.ivory), blue(C.ivory), 180);
+  text(`since ${profile.firstPlay}`, innerX, yCur);
+  yCur += szLine * 1.2;
+
+  // ── Tableau dernières parties ──────────────────────────────────────────────
+  // Colonnes : You(score) | Adversaire(rank) | ↑+N (bleuPastel) ou ↓-N (rougePétrole)
+  const rowH      = szLine * 1.15;
+  const colWidth  = innerW;
+  const colDelta  = colWidth * 0.18;     // largeur colonne droite
+  const colYou    = colWidth * 0.36;     // largeur colonne gauche
+  const colOpp    = colWidth - colYou - colDelta;
+
+  textFont(fontLarge); fill(C.ivory);
+  textSize(szLine * 0.75);
+  textAlign(LEFT, TOP);
+
+  // Limite : afficher uniquement ce qui rentre dans le cadre
+  const yMax = by + 13*a - r * 0.8;
+  const games = profile.recentGames.slice();
+  for (let i = 0; i < games.length; i++) {
+    if (yCur + rowH > yMax) break;
+    const g = games[i];
+
+    // Colonne gauche : You (yourScore)
+    fill(C.ivory);
+    text(`YOU (${g.youScore})`, innerX, yCur);
+
+    // Colonne milieu : OPPONENT (rank)
+    text(`${g.opponent} (${g.oppRank})`, innerX + colYou, yCur);
+
+    // Colonne droite : flèche + delta, couleur bleue (gain) / rouge (perte)
+    const arrowChar = g.delta >= 0 ? '↑' : '↓';
+    const deltaStr  = `${arrowChar}${g.delta >= 0 ? '+' : ''}${g.delta}`;
+    fill(g.delta >= 0 ? C.gainBlue : C.lossRed);
+    textAlign(RIGHT, TOP);
+    text(deltaStr, innerX + colWidth, yCur);
+    textAlign(LEFT, TOP);
+
+    yCur += rowH;
+  }
+}
+
+// Dessine une part de tarte monochrome (juste la part pleine)
+// Démarre à 12h, sens horaire ; pas de tracé pour la part vide.
+function drawPiePicto(cx, cy, rad, pct) {
+  if (pct <= 0) return;
+  noStroke(); fill(C.ivory);
+  if (pct >= 1) {
+    ellipse(cx, cy, rad * 2, rad * 2);
+    return;
+  }
+  const a0 = -HALF_PI;                    // 12h
+  const a1 = -HALF_PI + TWO_PI * pct;
+  arc(cx, cy, rad * 2, rad * 2, a0, a1, PIE);
+}
+
+// Dessine un pictogramme podium (3 barres : moyenne, longue, courte)
+// Layout : barre 2 plus haute au milieu, barre 1 à gauche, barre 3 à droite décroissantes.
+function drawPodiumPicto(x, y, w, h) {
+  const barW = w / 4;
+  const gap  = (w - 3 * barW) / 2;
+  const h1 = h * 0.65;
+  const h2 = h * 1.00;
+  const h3 = h * 0.45;
+  noStroke(); fill(C.ivory);
+  rect(x,                 y + (h - h1), barW, h1);
+  rect(x + barW + gap,    y + (h - h2), barW, h2);
+  rect(x + 2*(barW+gap),  y + (h - h3), barW, h3);
 }
 
 // ── Modal "Offer double?" / "Accept?" (R7) ───────────────────────────────────
@@ -320,47 +583,62 @@ function drawModal() {
 
   if (modalState.type === 'offer') {
     if (fontLarge) textFont(fontLarge);
-    textSize(r * 1.1);
+    textSize(r * 1.1 * MSG_SCALE);
     text('Offer double?', cx, cy - r * 1.6);
 
-    textSize(r * 1.0);
+    textSize(r * 1.0 * MSG_SCALE);
     const dx = r * 3;
     const yY = cy + r * 0.8;
     text('YES', cx - dx, yY);
     text('NO',  cx + dx, yY);
     modalBtns = {
-      yes: { cx: cx - dx, cy: yY, hw: r * 1.4, hh: r * 1.0 },
-      no:  { cx: cx + dx, cy: yY, hw: r * 1.4, hh: r * 1.0 },
+      yes: { cx: cx - dx, cy: yY, hw: r * 1.4 * MSG_SCALE, hh: r * 1.0 * MSG_SCALE },
+      no:  { cx: cx + dx, cy: yY, hw: r * 1.4 * MSG_SCALE, hh: r * 1.0 * MSG_SCALE },
+    };
+
+  } else if (modalState.type === 'resign') {
+    if (fontLarge) textFont(fontLarge);
+    textSize(r * 1.1 * MSG_SCALE);
+    text('Resign current game?', cx, cy - r * 1.6);
+
+    textSize(r * 1.0 * MSG_SCALE);
+    const dx = r * 3;
+    const yY = cy + r * 0.8;
+    text('YES', cx - dx, yY);
+    text('NO',  cx + dx, yY);
+    modalBtns = {
+      yes: { cx: cx - dx, cy: yY, hw: r * 1.4 * MSG_SCALE, hh: r * 1.0 * MSG_SCALE },
+      no:  { cx: cx + dx, cy: yY, hw: r * 1.4 * MSG_SCALE, hh: r * 1.0 * MSG_SCALE },
     };
 
   } else if (modalState.type === 'quit') {
     if (fontLarge) textFont(fontLarge);
-    textSize(r * 1.1);
+    textSize(r * 1.1 * MSG_SCALE);
     text('Quit current game?', cx, cy - r * 1.6);
 
-    textSize(r * 1.0);
+    textSize(r * 1.0 * MSG_SCALE);
     const dx = r * 3;
     const yY = cy + r * 0.8;
     text('YES', cx - dx, yY);
     text('NO',  cx + dx, yY);
     modalBtns = {
-      yes: { cx: cx - dx, cy: yY, hw: r * 1.4, hh: r * 1.0 },
-      no:  { cx: cx + dx, cy: yY, hw: r * 1.4, hh: r * 1.0 },
+      yes: { cx: cx - dx, cy: yY, hw: r * 1.4 * MSG_SCALE, hh: r * 1.0 * MSG_SCALE },
+      no:  { cx: cx + dx, cy: yY, hw: r * 1.4 * MSG_SCALE, hh: r * 1.0 * MSG_SCALE },
     };
 
   } else if (modalState.type === 'accept') {
     // En mode IA, l'IA décide seule → ne pas afficher le modal côté user
     if (aiMode && modalState.player === 'black') return;
     if (fontLarge) textFont(fontLarge);
-    textSize(r * 0.9);
+    textSize(r * 0.9 * MSG_SCALE);
     text('Your opponent offers you a double', cx, cy - r * 2.2);
 
     textFont('Arial');
-    textSize(r * 2.7);
+    textSize(r * 2.7 * MSG_SCALE);
     const dx = r * 3;
     const yY = cy + r * 0.8;
-    const acceptBtn  = { cx: cx - dx, cy: yY, hw: r * 1.8, hh: r * 1.8 };
-    const declineBtn = { cx: cx + dx, cy: yY, hw: r * 1.8, hh: r * 1.8 };
+    const acceptBtn  = { cx: cx - dx, cy: yY, hw: r * 1.8 * MSG_SCALE, hh: r * 1.8 * MSG_SCALE };
+    const declineBtn = { cx: cx + dx, cy: yY, hw: r * 1.8 * MSG_SCALE, hh: r * 1.8 * MSG_SCALE };
     const hoverA = isClickInBtn(acceptBtn);
     const hoverD = isClickInBtn(declineBtn);
 
@@ -400,10 +678,12 @@ function drawGameOver() {
   fill(C.ivory);
   textAlign(CENTER, CENTER);
   if (fontLarge) textFont(fontLarge);
-  textSize(r * 2.0); text('GAME OVER', cx, cy - r * 2.5);
-  textSize(r * 1.4); text(`${winnerName} WINS`, cx, cy - r * 0.5);
-  textSize(r * 1.0); text(`${label}  +${pts}`, cx, cy + r * 1.0);
-  textSize(r * 0.7); text('[5] nouvelle partie', cx, cy + r * 2.5);
+  // 4 lignes uniformément espacées autour de cy (centrage vertical)
+  // Espacement = 2.7r entre centres → spans 8.1r répartis [-4.05r .. +4.05r]
+  textSize(r * 2.0 * MSG_SCALE); text('GAME OVER',           cx, cy - r * 4.05);
+  textSize(r * 1.4 * MSG_SCALE); text(`${winnerName} WINS`,  cx, cy - r * 1.35);
+  textSize(r * 1.0 * MSG_SCALE); text(`${label}  +${pts}`,   cx, cy + r * 1.35);
+  textSize(r * 0.7 * MSG_SCALE); text('[5] nouvelle partie', cx, cy + r * 4.05);
 }
 
 // ── Smooth drag (vitesse d'accroche / 2) ─────────────────────────────────────
@@ -635,6 +915,7 @@ function drawCheckerLabel(cx, cy, isWhite, label) {
   noStroke();
   fill(isWhite ? C.numColor : C.ivory);
   textAlign(CENTER, CENTER);
+  textFont(fontLarge);
   textSize(r * 0.78);
   // En mirror le canvas est flippé horizontalement : on ré-flip localement le texte
   if (mirrorMode) {
@@ -785,6 +1066,14 @@ function isPtAvailable(pt) {
 function mousePressed() {
   // ── Room (lobby) : click sur joueur disponible → invitation + accept auto (mock) ──
   if (appState === 'room') {
+    // EXIT : retour au jeu (ou état neutre si aucune partie en cours)
+    for (const eb of exitBtns) {
+      if (mouseX >= eb.x && mouseX <= eb.x + eb.w
+          && mouseY >= eb.y && mouseY <= eb.y + eb.h) {
+        appState = 'game';
+        return;
+      }
+    }
     for (const btn of roomBtns) {
       if (mouseX >= btn.x && mouseX <= btn.x + btn.w
           && mouseY >= btn.y && mouseY <= btn.y + btn.h) {
@@ -845,26 +1134,56 @@ function mousePressed() {
         modalState = null; return;
       }
     }
+    if (modalState.type === 'resign') {
+      if (modalBtns.yes && isClickInBtn(modalBtns.yes)) {
+        const player = modalState.player;
+        modalState = null;
+        resign(player);
+        return;
+      }
+      if (modalBtns.no && isClickInBtn(modalBtns.no)) {
+        modalState = null; return;
+      }
+    }
     return;
   }
 
-  // Bouton EXIT (↪▯) : zones cliquables précises (pas de zone englobante)
+  // Bouton EXIT (↪⁰) : zones cliquables précises
+  // - Overlay profil ouvert : EXIT ferme l'overlay
+  // - Game over          : EXIT retourne au room
+  // - Sinon              : EXIT ouvre le modal QUIT
   for (const eb of exitBtns) {
     if (mouseX >= eb.x && mouseX <= eb.x + eb.w
         && mouseY >= eb.y && mouseY <= eb.y + eb.h) {
-      if (gameWinner) { appState = 'room'; }
-      else            { modalState = { type: 'quit' }; }
+      if (profileOverlay) { profileOverlay = null; return; }
+      if (gameWinner)     { appState = 'room';     return; }
+      modalState = { type: 'quit' };
+      return;
+    }
+  }
+
+  // Si overlay profil ouvert : n'importe quel clic le ferme
+  if (profileOverlay) { profileOverlay = null; return; }
+
+  // Clic sur le nom d'un joueur → ouvre l'overlay profil
+  for (const player of ['white', 'black']) {
+    const nb = nameBtns[player];
+    if (nb && mouseX >= nb.x && mouseX <= nb.x + nb.w
+          && mouseY >= nb.y && mouseY <= nb.y + nb.h) {
+      profileOverlay = player;
       return;
     }
   }
 
   if (gameMode && gameWinner) return;
 
-  // R6 : drapeau RESIGN
-  if (resignBtn
+  // R6 : drapeau RESIGN — 1 clic ouvre directement le modal de confirmation.
+  // Le drapeau passe plein (⚑) pendant que le modal est ouvert.
+  const onResign = resignBtn
       && mouseX >= resignBtn.x && mouseX <= resignBtn.x + resignBtn.w
-      && mouseY >= resignBtn.y && mouseY <= resignBtn.y + resignBtn.h) {
-    resign(resignBtn.player);
+      && mouseY >= resignBtn.y && mouseY <= resignBtn.y + resignBtn.h;
+  if (onResign) {
+    modalState = { type: 'resign', player: resignBtn.player };
     return;
   }
 
@@ -1124,17 +1443,20 @@ function drawPlayerInfo() {
   const sB    = (typeof gameScore !== 'undefined') ? gameScore.black : 0;
   const baseW = (mockState.players && mockState.players.white) || 'USER 2';
   const baseB = (mockState.players && mockState.players.black) || 'USER 1';
-  const szN = r * 1.4;
-  const szP = r * 0.85;
-  const gap = r * 0.2;
+  // Bloc nom + pip line ≈ 3.5r — top aligné sur bord sup du dé,
+  // bottom aligné sur bord inf du dé (dieSize = 3.5r).
+  // Le superscript ⁽elo⁾ peut déborder un peu au-dessus, c'est accepté.
+  const szN = r * 2.00;
+  const szP = r * 1.20;
+  const gap = r * 0.30;
 
-  // En paysage : ↪▯ ajouté sous le PIP → bloc plus grand
-  const szExit  = r * 1.0;
-  const exitGap = r * 0.5;   // espacement supplémentaire avant ↪▯
-  function blockH() { return szN + gap + szP + (diceOnSide ? exitGap + szExit : 0); }
+  // En paysage : ↪▯ ajouté sous le PIP
+  // szExit / exitGap supprimés : le bouton EXIT est maintenant en bas (drawExitButton)
+  function blockH() { return szN + gap + szP; }
 
-  // Dessine ↪▯ sous le PIP (paysage uniquement, joueur local seulement) + hover
-  function drawExitUnderPip(x, y) {
+  /* drawExitUnderPip supprimé : EXIT est maintenant en bas via drawExitButton.
+     Bloc commenté ci-dessous pour éviter les références mortes à szExit.
+  function _removed_drawExitUnderPip(x, y) {
     const arrow = '\u21AA';
     const rect0 = '\u25AF';
     const rect1 = '\u25AE';
@@ -1146,15 +1468,9 @@ function drawPlayerInfo() {
     const isHover = mouseX >= x && mouseX <= x + totalW
                  && mouseY >= y && mouseY <= y + szExit;
     text(arrow, x, y);
-    text(isHover ? rect1 : rect0, x + arrowW, y);
-    if (isHover) {
-      textFont(fontSmall); textSize(szExit * 0.7);
-      text('  EXIT?', x + totalW, y);
-    }
-    exitBtns.push({ x, y, w: totalW, h: szExit });
-  }
+  } */
 
-  // Dessine la 2e ligne : +XXX⬤ (15) (1:59) [/ NOTICE]
+  // Dessine la 2e ligne : +XXX⬤ (15) (1:59) ⚐
   function drawSecondLine(x, y, pip, player) {
     const useDyn    = gameMode && !!timerState;
     const isCurrent = mockState.turn === player;
@@ -1205,21 +1521,36 @@ function drawPlayerInfo() {
     text(gameStr, cx, y);
     cx += textWidth('(9:99)');
 
-    // ↪▯ exit — en portrait, à la suite du game timer (joueur local seulement)
-    if (!diceOnSide && gameMode && LOCAL_PLAYER === player) {
-      cx += r * 0.4;
-      cx = drawExitInline(cx, y, szP);
-    }
-
-    // / NOTICE (visible uniquement côté joueur ayant promis le double)
-    if (gameMode && cubePromised === player) {
-      fill(C.ivory);
-      textFont(fontSmall); textSize(szP);
-      text(' / DOUBLE BEFORE YOU ROLL', cx, y);
+    // Drapeau RESIGN ⚐ inline après le timer (sur la même ligne).
+    // En IA : seulement côté LOCAL_PLAYER (peut abandonner à tout moment)
+    // En hot-seat : seulement côté joueur courant
+    if (gameMode && !gameWinner) {
+      const showFlag = aiMode ? (player === LOCAL_PLAYER) : (mockState.turn === player);
+      if (showFlag) {
+        cx += r * 0.4;   // espacement après le timer
+        const flagH = szP * 1.15;
+        // Centre vertical = milieu visuel du texte timer (ligne PIP)
+        textFont(fontSmall); textSize(szP);
+        const lineCY = y + (textAscent() + textDescent()) / 2;
+        const flagY  = lineCY - flagH / 2;
+        textFont('Arial'); textSize(flagH); textAlign(LEFT, TOP);
+        const flagW  = textWidth('⚐');
+        const isHover = mouseX >= cx && mouseX <= cx + flagW
+                     && mouseY >= flagY && mouseY <= flagY + flagH;
+        // Drapeau plein pendant le modal RESIGN (sinon : hover-only)
+        const modalOpen = modalState && modalState.type === 'resign'
+                       && modalState.player === player;
+        const showAsk   = isHover || modalOpen;
+        fill(C.ivory); noStroke();
+        text(showAsk ? '⚑' : '⚐', cx, flagY);
+        resignBtn = { x: cx, y: flagY, w: flagW, h: flagH, player };
+      }
     }
   }
 
-  // Dessine ↪▯ inline + hover (▯→▮ + " EXIT?"). Retourne le nouveau cx.
+  // drawThirdLine supprimé : drapeau désormais sur la 2e ligne (drawSecondLine), exit en bas (drawExitButton)
+
+  /* drawExitInline supprimé : EXIT déplacé en bas via drawExitButton.
   function drawExitInline(x, y, sz) {
     const arrow = '\u21AA';
     const rect0 = '\u25AF';   // ▯ vide
@@ -1237,14 +1568,8 @@ function drawPlayerInfo() {
                  && mouseY >= topY && mouseY <= topY + sz;
     text(arrow, x, centerY);
     text(isHover ? rect1 : rect0, x + arrowW, centerY);
-    let cx = x + totalW;
-    // Réserve toujours la largeur du label EXIT? pour que le texte suivant ne saute pas
-    textFont(fontSmall); textSize(sz);
-    if (isHover) text('  EXIT?', cx, centerY);
-    cx += textWidth('  EXIT?');
-    exitBtns.push({ x, y: topY, w: totalW, h: sz });
-    return cx;
-  }
+    return x + totalW;
+  } */
 
   // Dessine : NAME ⁽elo⁾ (sessionScore) — superscript entre le nom et le score session
   function drawNameLeft(baseName, sessionScore, x, y, player) {
@@ -1271,46 +1596,48 @@ function drawPlayerInfo() {
     cx += textWidth(` (${sessionScore})`);
 
     nameBlockW[player] = cx - x;
+    // Zone cliquable sur le bloc nom (ouvre l'overlay profil joueur)
+    nameBtns[player] = { x, y, w: cx - x, h: szN, player };
   }
 
   // Reset des zones cliquables (recalculées plus bas)
   resignBtn = null;
   cubeBtns  = { white: null, black: null };
   exitBtns  = [];
+  nameBtns  = { white: null, black: null };
 
   if (diceOnSide) {
     // ── Paysage : à r/2 à droite de la ligne latérale droite du plateau ──
-    // ↪▯ ajouté sous le PIP du joueur local pour éviter la superposition avec RESIGN
+    // ↪▯ exit déplacé en bas-droite (drawExitButton). Drapeau sur la 2e ligne (drawSecondLine).
     const x = bx + 13*a + r/2;
     // Black (haut) : top à by
     drawNameLeft(baseB, sB, x, by, 'black');
     drawSecondLine(x, by + szN + gap, pipB, 'black');
-    if (LOCAL_PLAYER === 'black')
-      drawExitUnderPip(x, by + szN + gap + szP + exitGap);
     drawNameAccessories(x, by, szN, 'black');
 
     // White (bas) : alignement inférieur sur le bord bas du plateau conservé
     const yWtop = by + 13*a - blockH();
     drawNameLeft(baseW, sW, x, yWtop, 'white');
     drawSecondLine(x, yWtop + szN + gap, pipW, 'white');
-    if (LOCAL_PLAYER === 'white')
-      drawExitUnderPip(x, yWtop + szN + gap + szP + exitGap);
     drawNameAccessories(x, yWtop, szN, 'white');
 
   } else {
-    // ── Portrait : à droite des dés ──
+    // ── Portrait : à droite des dés (bloc 2 lignes = dieSize) ──
+    // Drapeau sur la 2e ligne (drawSecondLine). Exit centré en bas (drawExitButton).
     const ds = dieSize();
     const tx = bx + 2*ds + r;
-    drawNameLeft(baseB, sB, tx, by - ds - r*1.6, 'black');
-    drawSecondLine(tx, by - ds - r*1.6 + szN + gap, pipB, 'black');
-    drawNameLeft(baseW, sW, tx, by + 13*a + r*1.6, 'white');
-    drawSecondLine(tx, by + 13*a + r*1.6 + szN + gap, pipW, 'white');
-    drawNameAccessories(tx, by - ds - r*1.6,   szN, 'black');
-    drawNameAccessories(tx, by + 13*a + r*1.6, szN, 'white');
+    const yBlackTop = by - ds - r*1.6;
+    const yWhiteTop = by + 13*a + r*1.6;
+    drawNameLeft(baseB, sB, tx, yBlackTop, 'black');
+    drawSecondLine(tx, yBlackTop + szN + gap, pipB, 'black');
+    drawNameLeft(baseW, sW, tx, yWhiteTop, 'white');
+    drawSecondLine(tx, yWhiteTop + szN + gap, pipW, 'white');
+    drawNameAccessories(tx, yBlackTop, szN, 'black');
+    drawNameAccessories(tx, yWhiteTop, szN, 'white');
   }
 }
 
-// ── Drapeau RESIGN + cube X 1/2/4 à droite du nom ────────────────────────────
+// ── Cube X 1/2/4 à droite du nom (drapeau RESIGN désormais dans drawSecondLine) ─
 function drawNameAccessories(nameX, nameY, szN, player) {
   // Si la partie est terminée par abandon : drapeau figé à côté du nom du perdant
   if (gameMode && gameWinner && gameWinType === 'resign') {
@@ -1333,28 +1660,7 @@ function drawNameAccessories(nameX, nameY, szN, player) {
   const cubeX = nameX + totalNameW + r * 0.4 + cubeR;
   const cubeY = nameY + szN * 0.5;
   drawDoublingCube(cubeX, cubeY, cubeR, player, isCurrentTurn);
-
-  // ── Drapeau RESIGN ──
-  // En mode IA : toujours visible côté LOCAL_PLAYER (peut abandonner à tout moment)
-  // En hot-seat : visible côté joueur courant uniquement
-  const showResign = aiMode ? (player === LOCAL_PLAYER) : isCurrentTurn;
-  if (showResign) {
-    const flagX = cubeX + cubeR + r * 0.4;
-    const flagY = nameY;
-    const flagH = szN * 0.8;
-    textFont('Arial'); textSize(flagH);
-    const flagW = textWidth('⚐');
-    const isHover = mouseX >= flagX && mouseX <= flagX + flagW
-                 && mouseY >= flagY && mouseY <= flagY + flagH;
-    resignBtn = { x: flagX, y: flagY, w: flagW, h: flagH, player };
-
-    fill(C.ivory); noStroke(); textAlign(LEFT, TOP);
-    text(isHover ? '⚑' : '⚐', flagX, flagY);
-    if (isHover) {
-      textFont(fontSmall); textSize(szN * 0.55);
-      text('  RESIGN?', flagX + flagW, flagY);
-    }
-  }
+  // Drapeau RESIGN désormais affiché par drawSecondLine (sur la ligne du timer)
 }
 
 // ── Doubling cube (R7) — caractères ❶ ❷ ❹ ────────────────────────────────────
