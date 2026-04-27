@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <title>Lumpzammon – Skin Preview</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #1a1a2e url('fond.jpg') center center / cover no-repeat;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+    }
+    canvas { display: block; touch-action: none; }
+    /* Masque l'écran "loading…" natif de p5.js */
+    #p5_loading { display: none !important; }
+  </style>
+</head>
+<body>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.4/p5.min.js"></script>
+  <script src="mockState.js?v=22"></script>
+  <script src="game/logic_standalone.js?v=22"></script>
+  <script src="game/ai_standalone.js?v=22"></script>
+  <script src="adapter.js?v=22"></script>
+  <script src="dice.js?v=22"></script>
+  <script src="sketch.js?v=22"></script>
+</body>
+</html>

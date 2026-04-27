@@ -241,3 +241,84 @@ PR #9 identified a bug where hit checkers appeared duplicated on the bar — `Bo
 ## Origin
 
 This project was scaffolded from a conversation with Claude Desktop. The seed files in `claude_seed/` contain the original artifacts: project structure, storage layer design, Firebase setup guide, and game logic. The React components, screens, hooks, Docker setup, and App router were built from these blueprints.
+
+---
+
+## Devanture Skin (p5.js standalone preview)
+
+A self-contained skin preview lives in `devanture/`. It runs without Vite/React (just `index.html` + p5.js from a CDN) and is intended as a visual prototype to be merged back into the React app once stable. A small Python dev server (`serve.py`) serves it with `Cache-Control: no-store` to avoid stale assets during iteration.
+
+### Run locally
+
+```bash
+python serve.py 3132 devanture
+# Open http://localhost:3132
+```
+
+The launch config is in `.claude/launch.json` (gitignored) for the Claude Code preview.
+
+### File layout
+
+```
+devanture/
+├── index.html                  # script loader (p5 CDN + local modules)
+├── sketch.js                   # main p5 sketch: rendering + input + UI states
+├── adapter.js                  # bridge between Logic state and rendered mockState
+├── dice.js                     # dice animation + fade states
+├── mockState.js                # static scenarios for visual tests ([1]-[4])
+├── game/
+│   ├── logic_standalone.js     # plain-JS port of src/game/logic.js
+│   └── ai_standalone.js        # placeholder AI (not used yet)
+├── fonts/                      # nortechico OTF (heading + small)
+├── fond.jpg / fond0…fond6.jpg  # background pool, randomised per match
+└── serve.py                    # dev server with no-cache headers (one level up)
+```
+
+### Keyboard
+
+| Key | Action |
+|-----|--------|
+| `1`-`4` | Load a static scenario from `mockState.js` |
+| `5` | Start a new game (real Logic, doubling cube enabled) |
+| `b` | Bar-entry test scenario |
+| `m` | Start a new **match**: random background + flips `mirrorMode` |
+
+### Game UI features
+
+- **Doubling cube** (`❶ ❷ ❹`) — per-player marker right of the name, pulses during own turn, click to promise a double for next turn. At the start of the next turn an "Offer double?" modal opens (YES/NO), then an "Accept?" modal on the opponent side (✓/⚐). Refusing gives the offerer the cube value as a simple win. Capped at ❹. Each click on the cube (initial **or** subsequent) resets the "YOU WILL BE ABLE TO DOUBLE BEFORE YOU ROLL." notice timer to remind the player to wait.
+- **Move + game timers** — `(15)` move timer (resets each turn) and `(M:SS)` game timer (per-player, only ticks for the active player). The active timer is at full opacity, the other at 50%. When the move timer hits 0 the game timer takes over; when the game timer hits 0 the player forfeits.
+- **Resign flag** — `⚐ → ⚑` on the same line as the timer, just after `(M:SS)`. **Single click** opens the resign confirmation modal directly; the flag stays full (`⚑`) while the modal is up. Resign always counts as a simple loss × `cubeValue`. The flag stays pinned to the resigner after game over.
+- **Game-over overlay** — black veil + `GAME OVER`, winner name, win type (`SIMPLE / GAMMON / BACKGAMMON / RESIGN`), and points added (`× cubeValue`). Lines are evenly spaced (`2.7r` between centres) so the overlay reads cleanly even on small screens. Press `5` for a new game (score persists across the match).
+- **Session score** — `(N)` after the player name = games won this match. Multiplayer score is shown in superscript `⁽elo⁾` (placeholder = 0 until wired to Firebase).
+- **Player profile overlay** — click a player's **name** to open a profile overlay (everything outside the board darkens, board frame stays). Shows: name (large), `(±N)` cumulative multiplayer score + `XX% 🥧 totalGames 📊 #RANK` line, `since YYYY-MM-DD`, then a recent-games table with three columns (`YOU (score)` / `OPPONENT (rank)` / `↑+N` blue-pastel or `↓-N` burgundy-petrol). The cumulative score in parens is **derived from the recent-games table** via `getMultiplayerScore(player) = sum(recentGames.delta)` so it always matches what the user can see in the table; this same value is shown as the in-game superscript next to the player name. Click anywhere or the EXIT button to close. Mock data lives in `PLAYER_PROFILES` in `adapter.js`. Ranks (7-tier ASCII-friendly): `ROOKIE` ≤ 50, `NOVICE` ≤ 150, `AMATEUR` ≤ 400, `SKILLED` ≤ 1000, `ADVANCED` ≤ 2500, `EXPERT` ≤ 5000, `MASTER` 5001+ (computed in `rankFromGames`).
+- **Multi-pickup for doubles** — clicking a piece below the top of a stack picks up that piece + all the ones above. With doubles, each piece can use multiple dice (`k = floor(diceLeft / N)`), so a `1-1` lets you move 2 pieces from `5` directly to `3`.
+- **Auto-pass with empty dice** — when the current player has no legal moves, the dice are shown as empty frames at 25% opacity for 1.2s, then the turn passes automatically.
+- **Exit to room** — `→ ⁰ → → ⁰` (right arrow + door, both glyphs from `nortechico-100`, door scaled to ~82.5% and bottom-aligned). Single button anchored at the canvas bottom: **centred** in portrait, **bottom-right** at `r/2` from edges in landscape. Visible during play, in the lobby and during game-over. Click closes the profile overlay if open, opens `Quit current game?` during play, or goes straight to room after game over.
+- **Room (lobby)** — black veil with the board outline as a frame, mocked player list with status (available/busy/offline). Clicking an available player opens a `Waiting for X` modal that auto-accepts after 1.5s and starts a fresh game. The EXIT button is also visible here (returns to game state). To be wired to the real Firebase lobby on integration.
+- **Random background per match** — pressing `m` (or auto-accepted invitation) tires a new background from `fond.jpg / fond0…fond6.jpg`, re-extracts the dominant hue and rebuilds the palette. `mirrorMode` toggles for each new match (visual flag for now; full mirroring will use the real `getBoardIndices(dir)` from `src/game/logic.js` once integrated).
+
+### Geometry
+
+**Landscape**: the board is centred horizontally in the window. Side margins are `max(3.5a, NAMES_W_A)` (currently `NAMES_W_A = 7`) so the right-hand info column always has room for the longest hovered label. Vertical margins reserve `~1.2a` for the point numbers (rendered with the updated `nortechico-60`).
+
+**Portrait**: the full content stack (top dice + board + bottom dice/text + bottom EXIT) is **vertically centred** in the window so the empty space above black equals the empty space below white. Player info block (name + PIP line) is sized to exactly `dieSize = 3.5r` so its top and bottom edges align with the dice. The "double promise" notice is positioned **between** the bottom of the white player block and the top of the EXIT button to avoid any overlap.
+
+**Fonts**: the `PIX-260426` family (`nortechico-20/40/60/80/100/140/200`) is used for all in-game typography. Pictograms that exist in `nortechico-100` (right arrow `→`, door `⁰`) are drawn in that font; pictograms that don't (flag `⚐⚑`, doubling-cube ❶❷❹, accept `✓`, player dot `⬤`, superscript parens `⁽⁾`) fall back to Arial.
+
+### Multiplayer hook
+
+`getMultiplayerScore(player)` is referenced from `drawNameLeft` but not implemented yet — when wired, it should return the player's ELO from Firebase. The `LOCAL_PLAYER` constant (default `'white'`) controls which side shows the resign flag and exit button; this will become dynamic per session on integration.
+
+### Sign-in (nickname)
+
+A minimal sign-in step gates the skin on first launch:
+
+- `appState = 'signin'` is entered when no nickname is found in `localStorage`.
+- The key is `'bg:nick'` — **the same key used by jpep's `MenuScreen` / `saveNick()` / `loadNick()`** (`app/src/storage/local.js`). On integration the user won't need to re-enter their nickname.
+- The overlay shows the board frame with `CHOOSE YOUR NICKNAME` and an HTML `<input>` overlay (so the native mobile keyboard appears). Submission via `Enter`, click anywhere or tap the `[ENTER] OR TAP HERE` hint.
+- Submitted value is uppercased, trimmed, length-capped at 16, written to `localStorage`, and propagated everywhere via `applyUserNick(nick)`:
+  - `mockState.players.white = nick`
+  - `mockState.players.black = aiMode ? 'COMPUTER' : 'OPPONENT'`
+  - `PLAYER_PROFILES.white.name = nick`
+- **No identity verification yet** — uniqueness of the nickname (so each player has consistent stats) is by convention only. When wired to Firebase this should become a server-side check before `saveNick()`.
+- **Sign out** — the local player's profile overlay (click on your own name) shows a `[ SIGN OUT ]` button centred at the bottom of the board frame. Tapping it removes `localStorage['bg:nick']`, clears `userNick`, and switches back to the sign-in overlay so a new nickname can be entered.
