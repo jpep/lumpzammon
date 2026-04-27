@@ -20,6 +20,8 @@ let nameBlockW = { white: 0, black: 0 };
 
 // Overlay profil joueur : null (fermé) ou 'white'|'black' (ouvert sur ce joueur)
 let profileOverlay = null;
+// Bouton SIGN OUT dans l'overlay profil (visible uniquement sur le profil du LOCAL_PLAYER)
+let signoutBtn     = null;
 
 // Animation d'un mouvement (trajectoire parabolique) — visualisation pour IA / adversaire
 let flyingChecker = null;   // { from, to, isWhite, fromX, fromY, toX, toY, t0, dur, onDone }
@@ -662,6 +664,24 @@ function drawPlayerProfile() {
 
     yCur += rowH;
   }
+
+  // ── SIGN OUT (uniquement sur son propre profil) ────────────────────────────
+  // Bouton visible centré en bas du cadre du plateau. Click → reset localStorage + signin.
+  signoutBtn = null;
+  if (player === LOCAL_PLAYER) {
+    const sz = szLine * 1.10;
+    textFont(fontLarge); textSize(sz);
+    fill(C.ivory);
+    textAlign(CENTER, BOTTOM);
+    const label = '[ SIGN OUT ]';
+    const w = textWidth(label);
+    const h = sz;
+    const bx2 = bx + 13*a / 2;                  // centre X du plateau
+    const by2 = by + 13*a - r * 0.6;            // près du bas du cadre
+    text(label, bx2, by2);
+    signoutBtn = { x: bx2 - w/2, y: by2 - h, w, h };
+    textAlign(LEFT, TOP);
+  }
 }
 
 // Dessine une part de tarte monochrome (juste la part pleine)
@@ -1292,8 +1312,22 @@ function mousePressed() {
     }
   }
 
-  // Si overlay profil ouvert : n'importe quel clic le ferme
-  if (profileOverlay) { profileOverlay = null; return; }
+  // Si overlay profil ouvert :
+  //  - clic sur SIGN OUT  → reset nickname + retour à l'écran sign-in
+  //  - clic n'importe où  → ferme l'overlay
+  if (profileOverlay) {
+    if (signoutBtn
+        && mouseX >= signoutBtn.x && mouseX <= signoutBtn.x + signoutBtn.w
+        && mouseY >= signoutBtn.y && mouseY <= signoutBtn.y + signoutBtn.h) {
+      try { localStorage.removeItem(NICK_STORAGE_KEY); } catch (e) {}
+      userNick = null;
+      profileOverlay = null;
+      appState = 'signin';
+      return;
+    }
+    profileOverlay = null;
+    return;
+  }
 
   // Clic sur le nom d'un joueur → ouvre l'overlay profil
   for (const player of ['white', 'black']) {

@@ -321,3 +321,4 @@ A minimal sign-in step gates the skin on first launch:
   - `mockState.players.black = aiMode ? 'COMPUTER' : 'OPPONENT'`
   - `PLAYER_PROFILES.white.name = nick`
 - **No identity verification yet** — uniqueness of the nickname (so each player has consistent stats) is by convention only. When wired to Firebase this should become a server-side check before `saveNick()`.
+- **Sign out** — the local player's profile overlay (click on your own name) shows a `[ SIGN OUT ]` button centred at the bottom of the board frame. Tapping it removes `localStorage['bg:nick']`, clears `userNick`, and switches back to the sign-in overlay so a new nickname can be entered.
