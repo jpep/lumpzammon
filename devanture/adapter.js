@@ -25,9 +25,14 @@ let openingActive = false;
 let hasOwnedDice = { white: false, black: false };
 
 // R7 doubling cube
+// Variante du jeu : chaque joueur peut doubler UNE seule fois par partie.
+// La valeur cubeValue est partagée (1 → 2 → 4) ; cubeUsed mémorise qui a déjà
+// utilisé son double. Les deux indicateurs affichent la même valeur, mais
+// celui qui a déjà doublé passe à 50 % d'opacité.
 let cubeValue    = 1;     // 1, 2 ou 4
 let cubePromised = null;  // 'white'|'black' = qui a promis d'offrir au prochain tour, ou null
 let cubeOwner    = null;  // null (aucun, début de partie) | 'white' | 'black' = qui possède le cube
+let cubeUsed     = { white: false, black: false };  // qui a consommé son double
 let modalState   = null;  // null | { type:'offer'|'accept', player }
 
 // Timers (jeu réel) : move = 15s par coup, game = 119s total par joueur
@@ -49,12 +54,44 @@ const PLAYER_PROFILES = {
     firstPlay:  '2024-03-15',
     // Adversaires variés : un panel réaliste (pas la même personne tout le temps)
     recentGames: [
-      { youScore: 4, opponent: 'NIA',     oppRank: 'AMATEUR',  delta:  +2 },
-      { youScore: 1, opponent: 'KAI',     oppRank: 'NOVICE',   delta:  -1 },
-      { youScore: 8, opponent: 'OMAR',    oppRank: 'AMATEUR',  delta:  +4 },
-      { youScore: 3, opponent: 'LUNA',    oppRank: 'SKILLED',  delta:  -2 },
-      { youScore: 5, opponent: 'ROCCO',   oppRank: 'NOVICE',   delta:  +1 },
-      { youScore: 2, opponent: 'PRIYA',   oppRank: 'ROOKIE',   delta:  -1 },
+      // < 24h → tableau affichera HH:MM
+      { youScore: 4, oppScore: 2, opponent: 'NIA',     delta:  +2, playedAt: '2026-04-28T14:23:00' },
+      { youScore: 1, oppScore: 2, opponent: 'KAI',     delta:  -1, playedAt: '2026-04-28T10:15:00' },
+      { youScore: 8, oppScore: 4, opponent: 'OMAR',    delta:  +4, playedAt: '2026-04-27T22:30:00' },
+      // > 24h → AA/MM/JJ
+      { youScore: 3, oppScore: 5, opponent: 'LUNA',    delta:  -2, playedAt: '2026-04-25T18:00:00' },
+      { youScore: 5, oppScore: 4, opponent: 'ROCCO',   delta:  +1, playedAt: '2026-04-22T09:45:00' },
+      { youScore: 2, oppScore: 3, opponent: 'PRIYA',   delta:  -1, playedAt: '2026-04-18T16:12:00' },
+      { youScore: 7, oppScore: 4, opponent: 'KENJI',   delta:  +3, playedAt: '2026-04-12T20:40:00' },
+      { youScore: 0, oppScore: 1, opponent: 'MIRA',    delta:  -1, playedAt: '2026-04-05T11:30:00' },
+      { youScore: 6, oppScore: 5, opponent: 'TOMAS',   delta:  +1, playedAt: '2026-03-28T19:00:00' },
+      { youScore: 2, oppScore: 4, opponent: 'AKIRA',   delta:  -2, playedAt: '2026-03-19T13:25:00' },
+      { youScore: 9, oppScore: 5, opponent: 'NEFFA',   delta:  +4, playedAt: '2026-03-08T17:50:00' },
+      { youScore: 1, oppScore: 3, opponent: 'OREN',    delta:  -2, playedAt: '2026-02-25T08:15:00' },
+      { youScore: 5, oppScore: 5, opponent: 'CIRO',    delta:  +1, playedAt: '2026-02-12T22:00:00' },
+      { youScore: 3, oppScore: 4, opponent: 'YUNA',    delta:  -1, playedAt: '2026-01-30T14:40:00' },
+      { youScore: 8, oppScore: 4, opponent: 'BRUNO',   delta:  +4, playedAt: '2026-01-15T16:00:00' },
+      { youScore: 4, oppScore: 6, opponent: 'IRINA',   delta:  -2, playedAt: '2025-12-29T20:30:00' },
+      { youScore: 7, oppScore: 5, opponent: 'DARIO',   delta:  +2, playedAt: '2025-12-10T11:55:00' },
+    ],
+    // Historique du score (Y) en fonction du temps (X = date ISO).
+    // X0 = firstPlay, X_max = aujourd'hui ; Y_max = 1000 (réf affichage).
+    scoreHistory: [
+      { date: '2024-03-15', score:   0 },
+      { date: '2024-04-20', score:  40 },
+      { date: '2024-05-30', score:  80 },
+      { date: '2024-07-10', score: 150 },
+      { date: '2024-08-22', score: 130 },
+      { date: '2024-10-05', score: 230 },
+      { date: '2024-11-18', score: 290 },
+      { date: '2025-01-04', score: 340 },
+      { date: '2025-02-19', score: 320 },
+      { date: '2025-04-12', score: 410 },
+      { date: '2025-06-25', score: 470 },
+      { date: '2025-09-08', score: 530 },
+      { date: '2025-12-15', score: 510 },
+      { date: '2026-02-28', score: 590 },
+      { date: '2026-04-26', score: 620 },
     ],
   },
   black: {
@@ -62,12 +99,39 @@ const PLAYER_PROFILES = {
     totalGames: 1456,
     firstPlay:  '2022-11-08',
     recentGames: [
-      { youScore: 8, opponent: 'AKEMI',   oppRank: 'AMATEUR',  delta:  +4 },
-      { youScore: 5, opponent: 'JAVIER',  oppRank: 'SKILLED',  delta:  +2 },
-      { youScore: 1, opponent: 'AURELIE', oppRank: 'MASTER',   delta:  -3 },
-      { youScore: 6, opponent: 'TARO',    oppRank: 'AMATEUR',  delta:  +2 },
-      { youScore: 2, opponent: 'INDRA',   oppRank: 'ADVANCED', delta:  -1 },
-      { youScore: 4, opponent: 'YANA',    oppRank: 'EXPERT',   delta:  +1 },
+      { youScore: 8, oppScore: 4, opponent: 'AKEMI',   delta:  +4, playedAt: '2026-04-28T13:50:00' },
+      { youScore: 5, oppScore: 3, opponent: 'JAVIER',  delta:  +2, playedAt: '2026-04-27T23:10:00' },
+      { youScore: 1, oppScore: 4, opponent: 'AURELIE', delta:  -3, playedAt: '2026-04-26T15:30:00' },
+      { youScore: 6, oppScore: 4, opponent: 'TARO',    delta:  +2, playedAt: '2026-04-23T19:20:00' },
+      { youScore: 2, oppScore: 3, opponent: 'INDRA',   delta:  -1, playedAt: '2026-04-19T10:00:00' },
+      { youScore: 4, oppScore: 3, opponent: 'YANA',    delta:  +1, playedAt: '2026-04-14T16:45:00' },
+      { youScore: 7, oppScore: 5, opponent: 'NORA',    delta:  +2, playedAt: '2026-04-08T22:15:00' },
+      { youScore: 3, oppScore: 4, opponent: 'KENJI',   delta:  -1, playedAt: '2026-04-02T18:00:00' },
+      { youScore: 5, oppScore: 6, opponent: 'IGOR',    delta:  -1, playedAt: '2026-03-25T11:30:00' },
+      { youScore: 8, oppScore: 4, opponent: 'SOFIA',   delta:  +4, playedAt: '2026-03-18T20:50:00' },
+      { youScore: 2, oppScore: 5, opponent: 'GAEL',    delta:  -3, playedAt: '2026-03-09T14:20:00' },
+      { youScore: 6, oppScore: 5, opponent: 'AMRITA',  delta:  +1, playedAt: '2026-02-28T17:10:00' },
+      { youScore: 4, oppScore: 7, opponent: 'BORIS',   delta:  -3, playedAt: '2026-02-15T09:35:00' },
+      { youScore: 9, oppScore: 5, opponent: 'YAEL',    delta:  +4, playedAt: '2026-02-03T21:00:00' },
+      { youScore: 1, oppScore: 3, opponent: 'EMRE',    delta:  -2, playedAt: '2026-01-22T13:40:00' },
+      { youScore: 7, oppScore: 5, opponent: 'PEDRO',   delta:  +2, playedAt: '2026-01-08T15:15:00' },
+    ],
+    scoreHistory: [
+      { date: '2022-11-08', score:   0 },
+      { date: '2023-01-22', score:  90 },
+      { date: '2023-04-15', score: 170 },
+      { date: '2023-07-03', score: 250 },
+      { date: '2023-09-21', score: 380 },
+      { date: '2023-12-12', score: 460 },
+      { date: '2024-03-04', score: 530 },
+      { date: '2024-06-18', score: 610 },
+      { date: '2024-09-25', score: 720 },
+      { date: '2024-12-30', score: 690 },
+      { date: '2025-03-22', score: 800 },
+      { date: '2025-06-14', score: 850 },
+      { date: '2025-09-08', score: 880 },
+      { date: '2025-12-20', score: 920 },
+      { date: '2026-04-26', score: 960 },
     ],
   },
 };
@@ -449,10 +513,10 @@ function resign(player) {
 function clickCube(player) {
   if (!gameMode || gameWinner || modalState) return;
   if (cubeValue >= 4) return;
-  // Si l'adversaire a déjà promis → bloqué (chacun son cube)
+  // Variante : chaque joueur ne peut doubler qu'une seule fois.
+  if (cubeUsed[player]) return;
+  // Si l'adversaire a déjà promis → bloqué
   if (cubePromised && cubePromised !== player) return;
-  // Règle backgammon : seul le possesseur du cube peut le doubler (cubeOwner=null → libre)
-  if (cubeOwner !== null && cubeOwner !== player) return;
   cubePromised = player;
   // Reset du timer du notice "YOU WILL BE ABLE TO DOUBLE…" :
   // chaque clic (initial OU rappel) relance l'affichage à pleine opacité
@@ -486,6 +550,7 @@ function modalAcceptResponse(accept) {
   if (accept) {
     cubeValue    = Math.min(cubeValue * 2, 4);
     cubeOwner    = opponent;       // l'accepteur possède désormais le cube
+    cubeUsed[offerer] = true;       // l'offrant a consommé son double (variante 1×/joueur)
     cubePromised = null;
     modalState   = null;
     rollAndStart(offerer === 'white' ? 1 : 2);
@@ -526,6 +591,7 @@ function startGame() {
   cubeValue    = 1;
   cubePromised = null;
   cubeOwner    = null;
+  cubeUsed     = { white: false, black: false };
   modalState   = null;
   hasOwnedDice = { white: false, black: false };
   resetTimers();
@@ -635,6 +701,7 @@ function startBarEntryTest() {
   cubeValue    = 1;
   cubePromised = null;
   cubeOwner    = null;
+  cubeUsed     = { white: false, black: false };
   modalState   = null;
   resetTimers();
 

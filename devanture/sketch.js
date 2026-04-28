@@ -22,6 +22,16 @@ let nameBlockW = { white: 0, black: 0 };
 let profileOverlay = null;
 // Bouton SIGN OUT dans l'overlay profil (visible uniquement sur le profil du LOCAL_PLAYER)
 let signoutBtn     = null;
+// Scroll vertical du tableau des dernières parties (en pixels, 0 = plus récent)
+let recentGamesScroll = 0;
+// État de drag tactile pour le scroll du tableau
+let _scrollTouchY = null;
+// Mode tactile dans l'overlay profil : 'scroll' | 'graph' | null
+let _touchMode    = null;
+// Vrai dès le 1er touch (pour distinguer un appareil tactile d'une souris)
+let _hasTouched   = false;
+// Zone du graphique de score (mise à jour à chaque frame par drawPlayerProfile)
+let _chartZone    = null;
 
 // Animation d'un mouvement (trajectoire parabolique) — visualisation pour IA / adversaire
 let flyingChecker = null;   // { from, to, isWhite, fromX, fromY, toX, toY, t0, dur, onDone }
@@ -58,7 +68,7 @@ const ROOM_PLAYERS = [
   { name: 'EVE',     online: false, busy: false },
 ];
 
-let fontLarge, fontSmall;
+let fontLarge, fontSmall, fontMed;
 
 
 // ── Palette globale (accessible depuis dice.js) ───────────────────────────────
@@ -78,6 +88,7 @@ function preload() {
   bgImage     = loadImage(currentFond);
   fontLarge   = loadFont('fonts/nortechico-100.otf');
   fontSmall   = loadFont('fonts/nortechico-60.otf');
+  fontMed     = loadFont('fonts/nortechico-80.otf');   // poids intermédiaire
 }
 
 // Extrait la teinte dominante de l'image (moyenne circulaire, pixels saturés seulement)
@@ -394,19 +405,20 @@ function drawDoublePromiseNotice() {
     if (alpha <= 0) return;
   }
 
-  // Position : centré entre le bord inférieur des dés joueur bas et le haut du bouton EXIT
-  // (évite le chevauchement avec le pictogramme EXIT)
+  // Position : symétrique par rapport à l'axe central du plateau, AU-DESSUS
+  // des infos de l'adversaire (c'est lui qu'on challenge avec le double).
+  // Distance : 1/3 entre le haut du bloc info adverse et le bord supérieur du canvas.
   const cx = windowWidth / 2;
   let cy;
-  const exitH = r * 1.4;
-  const exitTopY = windowHeight - r/2 - exitH;
+  const canvasTopSafe = r / 2;
   if (diceOnSide) {
-    // Paysage : entre bas du plateau et haut du bouton EXIT
-    cy = (by + 13*a + exitTopY) / 2;
+    // Paysage : adversaire à droite, blocs noir et blanc s'opposent verticalement.
+    // On place la notice à 1/3 entre le haut du plateau et le bord supérieur du canvas.
+    cy = canvasTopSafe + (by - canvasTopSafe) * 2 / 3;
   } else {
-    // Portrait : entre bas du bloc dés/texte joueur blanc et haut du bouton EXIT
-    const textBottomY = by + 13*a + r*1.6 + dieSize();
-    cy = (textBottomY + exitTopY) / 2;
+    // Portrait : 1/3 au-dessus du haut du bloc info BLACK
+    const yBtextTop = by - dieSize() - r*1.6;
+    cy = yBtextTop - (yBtextTop - canvasTopSafe) / 3;
   }
   noStroke();
   fill(red(C.ivory), green(C.ivory), blue(C.ivory), Math.round(255 * alpha));
@@ -626,44 +638,130 @@ function drawPlayerProfile() {
   textFont(fontSmall); textSize(szLine * 0.75);
   fill(red(C.ivory), green(C.ivory), blue(C.ivory), 180);
   text(`since ${profile.firstPlay}`, innerX, yCur);
-  yCur += szLine * 1.2;
+  yCur += szLine * 1.4;
+
+  // ── Polyligne lissée score = f(temps) ─────────────────────────────────────
+  // X de firstPlay à aujourd'hui, Y de 0 à 1000, sans labels.
+  // Épaisseur 4.5 (= 3 × contour du plateau). Espace réservé au-dessous pour
+  // un éventuel intitulé du graphique à venir.
+  const chartH = szLine * 4.5;
+  _chartZone = { x: innerX, y: yCur, w: innerW, h: chartH };
+  drawScorePolyline(profile, innerX, yCur, innerW, chartH);
+  yCur += chartH + szLine * 1.8;   // marge 1.8 pour titre futur
 
   // ── Tableau dernières parties ──────────────────────────────────────────────
-  // Colonnes : You(score) | Adversaire(rank) | ↑+N (bleuPastel) ou ↓-N (rougePétrole)
-  const rowH      = szLine * 1.15;
+  // 4 colonnes : ↑+N / ↓-N | You(score) | P - O (résultat monoespacé) | Adversaire(rank)
+  // La colonne delta est à gauche du nom du joueur. Le résultat affiche les points
+  // de chaque côté ; seul le vainqueur est mis en surbrillance (bleu si on gagne,
+  // rouge si on perd), le perdant reste ivoire.
+  // Police agrandie ; les chiffres sont alignés autour d'un tiret fixe.
+  const tableTextSize = szLine * 0.90;
+  const rowH      = tableTextSize * 1.30;
   const colWidth  = innerW;
-  const colDelta  = colWidth * 0.18;     // largeur colonne droite
-  const colYou    = colWidth * 0.36;     // largeur colonne gauche
-  const colOpp    = colWidth - colYou - colDelta;
+  const colDelta  = colWidth * 0.16;
+  const colYou    = colWidth * 0.20;
+  const colRes    = colWidth * 0.18;
+  const colDate   = colWidth * 0.18;          // colonne date à droite
+  const colOpp    = colWidth - colDelta - colYou - colRes - colDate;
 
-  textFont(fontLarge); fill(C.ivory);
-  textSize(szLine * 0.75);
+  textFont(fontLarge);
+  textSize(tableTextSize);
   textAlign(LEFT, TOP);
 
-  // Limite : afficher uniquement ce qui rentre dans le cadre
-  const yMax = by + 13*a - r * 0.8;
-  const games = profile.recentGames.slice();
+  // Largeurs fixes pour monoespacement du résultat (jusqu'à 2 chiffres / côté)
+  const digitsW = textWidth('00');
+  const dashStr = ' - ';
+  const dashW   = textWidth(dashStr);
+  const resTotW = digitsW + dashW + digitsW;
+  const resStart = innerX + colDelta + colYou + Math.max(0, (colRes - resTotW) / 2);
+
+  // Zone scrollable des parties : commence à yCur, s'étend jusqu'au bas du cadre
+  // (avec marge pour le bouton SIGN OUT en bas).
+  const tableTopY = yCur;
+  const tableBotY = by + 13*a - r * 2.4;     // réserve sous le tableau pour SIGN OUT
+  // Hauteur totale "logique" du contenu et bornes de scroll
+  const games = profile.recentGames || [];
+  const totalH = games.length * rowH;
+  const visibleH = Math.max(0, tableBotY - tableTopY);
+  const maxScroll = Math.max(0, totalH - visibleH);
+  if (recentGamesScroll > maxScroll) recentGamesScroll = maxScroll;
+  if (recentGamesScroll < 0)         recentGamesScroll = 0;
+
+  // Clip pour empêcher le tableau de déborder de la zone visible
+  drawingContext.save();
+  drawingContext.beginPath();
+  drawingContext.rect(innerX - 4, tableTopY, innerW + 8, visibleH);
+  drawingContext.clip();
+
   for (let i = 0; i < games.length; i++) {
-    if (yCur + rowH > yMax) break;
+    const ry = tableTopY + i * rowH - recentGamesScroll;
+    if (ry + rowH < tableTopY) continue;     // au-dessus de la zone visible
+    if (ry > tableBotY)        break;        // sous la zone visible
     const g = games[i];
+    const playerWon = g.delta > 0;
+    const winPts    = Math.abs(g.delta);
+    const playerPts = playerWon ? winPts : 0;
+    const oppPts    = playerWon ? 0     : winPts;
 
-    // Colonne gauche : You (yourScore)
-    fill(C.ivory);
-    text(`YOU (${g.youScore})`, innerX, yCur);
-
-    // Colonne milieu : OPPONENT (rank)
-    text(`${g.opponent} (${g.oppRank})`, innerX + colYou, yCur);
-
-    // Colonne droite : flèche + delta, couleur bleue (gain) / rouge (perte)
-    const arrowChar = g.delta >= 0 ? '↑' : '↓';
-    const deltaStr  = `${arrowChar}${g.delta >= 0 ? '+' : ''}${g.delta}`;
-    fill(g.delta >= 0 ? C.gainBlue : C.lossRed);
-    textAlign(RIGHT, TOP);
-    text(deltaStr, innerX + colWidth, yCur);
+    // Colonne 1 : flèche + delta — couleur bleue (gain) / rouge (perte)
+    const arrowChar = playerWon ? '↑' : '↓';
+    const deltaStr  = `${arrowChar}${playerWon ? '+' : ''}${g.delta}`;
+    fill(playerWon ? C.gainBlue : C.lossRed);
     textAlign(LEFT, TOP);
+    text(deltaStr, innerX, ry);
 
-    yCur += rowH;
+    // Colonne 2 : YOU + (score) en superscript (×1.5 plus grand qu'avant)
+    fill(C.ivory);
+    text('YOU', innerX + colDelta, ry);
+    {
+      const baseW = textWidth('YOU');
+      const supSize = tableTextSize * 0.825;     // 0.55 × 1.5
+      textSize(supSize);
+      text(`(${g.youScore})`, innerX + colDelta + baseW + tableTextSize * 0.06, ry);
+      textSize(tableTextSize);
+    }
+
+    // Colonne 3 : résultat "P - O" monoespacé.
+    // Plus de surbrillance couleur : tout en ivoire. Le vainqueur est marqué
+    // par la fonte nortechico-80 (poids intermédiaire) au lieu de la couleur.
+    fill(C.ivory);
+    if (playerWon && fontMed) textFont(fontMed);
+    textAlign(RIGHT, TOP);
+    text(String(playerPts), resStart + digitsW, ry);
+
+    textFont(fontLarge);
+    textAlign(LEFT, TOP);
+    text(dashStr, resStart + digitsW, ry);
+
+    if (!playerWon && fontMed) textFont(fontMed);
+    text(String(oppPts), resStart + digitsW + dashW, ry);
+    textFont(fontLarge);
+
+    // Colonne 4 : OPPONENT + (score) en superscript (×1.5 plus grand)
+    fill(C.ivory);
+    textAlign(LEFT, TOP);
+    const oppX = innerX + colDelta + colYou + colRes;
+    text(g.opponent, oppX, ry);
+    {
+      const baseW = textWidth(g.opponent);
+      const supSize = tableTextSize * 0.825;
+      textSize(supSize);
+      text(`(${g.oppScore})`, oppX + baseW + tableTextSize * 0.06, ry);
+      textSize(tableTextSize);
+    }
+
+    // Colonne 5 (droite) : date AA/MM/JJ ou HH:MM si < 24h
+    if (g.playedAt) {
+      fill(red(C.ivory), green(C.ivory), blue(C.ivory), 200);
+      textAlign(RIGHT, TOP);
+      textFont(fontSmall); textSize(tableTextSize * 0.85);
+      text(formatGameDate(g.playedAt), innerX + colWidth, ry);
+      textFont(fontLarge); textSize(tableTextSize);
+    }
   }
+
+  drawingContext.restore();
+  yCur = tableBotY;     // sortie de la zone scrollable
 
   // ── SIGN OUT (uniquement sur son propre profil) ────────────────────────────
   // Bouton visible centré en bas du cadre du plateau. Click → reset localStorage + signin.
@@ -710,6 +808,100 @@ function drawPodiumPicto(x, y, w, h) {
   rect(x,                 y + (h - h1), barW, h1);
   rect(x + barW + gap,    y + (h - h2), barW, h2);
   rect(x + 2*(barW+gap),  y + (h - h3), barW, h3);
+}
+
+// Format de la date de partie : HH:MM si < 24h, sinon AA/MM/JJ.
+function formatGameDate(iso) {
+  const t = Date.parse(iso);
+  if (isNaN(t)) return '';
+  const now = Date.now();
+  const ageMs = now - t;
+  const ONE_DAY = 24 * 60 * 60 * 1000;
+  const d = new Date(t);
+  const pad = n => String(n).padStart(2, '0');
+  if (ageMs >= 0 && ageMs < ONE_DAY) {
+    return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }
+  const yy = pad(d.getFullYear() % 100);
+  return `${yy}/${pad(d.getMonth() + 1)}/${pad(d.getDate())}`;
+}
+
+// ── Polyligne lissée score = f(temps) ────────────────────────────────────────
+// Sans axes ni labels : X de firstPlay à aujourd'hui ; Y de 0 à Y_MAX (1000).
+// Épaisseur du trait identique au contour du plateau (1.5). Lissée via curveVertex.
+function drawScorePolyline(profile, x, y, w, h) {
+  const Y_MAX = 1000;
+  const hist  = profile.scoreHistory;
+  if (!hist || hist.length < 2) return;
+
+  // X = timestamp ms ; bornes : firstPlay → aujourd'hui
+  const t0 = Date.parse(profile.firstPlay);
+  const t1 = Date.now();
+  const span = Math.max(1, t1 - t0);
+
+  // Conversion (date, score) → (px, py) dans la zone (x, y, w, h)
+  function pt(p) {
+    const tx = (Date.parse(p.date) - t0) / span;
+    const sy = Math.max(0, Math.min(1, p.score / Y_MAX));
+    return { px: x + tx * w, py: y + h - sy * h, date: p.date, score: p.score };
+  }
+  const pts = hist.map(pt);
+
+  // Tracé lissé via curveVertex (Catmull-Rom). Premier et dernier point dupliqués
+  // pour que la spline atteigne effectivement les extrémités.
+  noFill();
+  stroke(C.ivory);
+  strokeWeight(4.5);   // 3 × contour du plateau (1.5)
+  beginShape();
+  curveVertex(pts[0].px, pts[0].py);
+  for (const p of pts) curveVertex(p.px, p.py);
+  curveVertex(pts[pts.length - 1].px, pts[pts.length - 1].py);
+  endShape();
+  noStroke();
+
+  // ── Tooltip au survol : (score) AAAA/MM/DD positionné sur la courbe
+  // Visible :
+  //  - desktop (souris hover) : quand pas de touch en cours
+  //  - mobile : seulement quand le doigt est en mode 'graph' (touch sur le graphique)
+  const showTip = _hasTouched ? (_touchMode === 'graph') : true;
+  const padY = h * 0.4;
+  if (showTip
+      && mouseX >= x && mouseX <= x + w
+      && mouseY >= y - padY && mouseY <= y + h + padY) {
+    // Interpolation linéaire entre les deux points encadrant mouseX
+    let pA = pts[0], pB = pts[pts.length - 1];
+    for (let i = 0; i < pts.length - 1; i++) {
+      if (pts[i].px <= mouseX && pts[i+1].px >= mouseX) {
+        pA = pts[i]; pB = pts[i+1];
+        break;
+      }
+    }
+    const tF   = pB.px === pA.px ? 0 : (mouseX - pA.px) / (pB.px - pA.px);
+    const tMs  = Date.parse(pA.date) + tF * (Date.parse(pB.date) - Date.parse(pA.date));
+    const score = Math.round(pA.score + tF * (pB.score - pA.score));
+    // Y interpolé sur la courbe au point survolé (pas le curseur)
+    const curveY = pA.py + tF * (pB.py - pA.py);
+    const date  = new Date(tMs);
+    const yyyy  = date.getFullYear();
+    const mm    = String(date.getMonth() + 1).padStart(2, '0');
+    const dd    = String(date.getDate()).padStart(2, '0');
+    const label = `(${score}) ${yyyy}/${mm}/${dd}`;
+    const txSz  = r * 0.825;             // ×1.5 pour meilleure lisibilité
+    textFont(fontSmall); textSize(txSz); textAlign(LEFT, BOTTOM);
+    const labW  = textWidth(label);
+
+    // Position : AU-DESSUS de la courbe au point hover, à droite si la place
+    // existe sinon à gauche. Espacement augmenté pour bien dégager la courbe.
+    const sideGap = r * 0.8;             // ×2 (était 0.4)
+    const yLift   = r * 0.7;             // ×~2.3 (était 0.3)
+    let tipX = mouseX + sideGap;
+    if (tipX + labW > x + w) tipX = mouseX - sideGap - labW;
+    const tipY = curveY - yLift;
+
+    fill(C.ivory);
+    text(label, tipX, tipY);
+    textAlign(LEFT, TOP);
+  }
 }
 
 // ── Modal "Offer double?" / "Accept?" (R7) ───────────────────────────────────
@@ -942,18 +1134,16 @@ function drawTri(x, baseY, pointUp, isDark, isTarget, isSnapped) {
 // ── Centres & positions ───────────────────────────────────────────────────────
 function ptCenterX(pt) {
   if (pt === 0) {
-    if (!diceOnSide) {
-      // Portrait : aligné sur la prochaine fiche dans la pile bearing off (drawOffPortrait)
-      const w   = r * 0.4;
-      const gap = (r / 2) * 4/5;
-      const step = w + gap;
-      const x0  = bx + 13*a;   // bord droit de la 1ʳᵉ fiche au bord du plateau
-      const idx = mockState.turn === 'white' ? mockState.off.white : mockState.off.black;
-      return x0 - w - idx * step + w / 2;
-    }
-    // Paysage : centre x du prochain slot
+    // Off zone : center X du prochain slot (pour le drag visual / animation).
+    // En portrait : pile horizontale → idx-ième fiche à x0 - w - idx*step
+    // En paysage  : grille 8×N à droite du plateau
     const idx = mockState.turn === 'white' ? mockState.off.white : mockState.off.black;
-    return bx + 13*a + r + floor(idx/8)*(2*r + r/2) + r;
+    if (diceOnSide) {
+      const w = 2*r, colW = w + r/2;
+      return bx + 13*a + r + Math.floor(idx/8)*colW + w/2;
+    }
+    const G = offGeomPortrait();
+    return G.x0 - G.w - idx * G.step + G.w/2;
   }
   let lx;
   if      (pt >=  1 && pt <=  6) lx = bx + (13-pt)*a;
@@ -965,23 +1155,17 @@ function ptCenterX(pt) {
 
 function ptNextY(pt) {
   if (pt === 0) {
-    const h = r * 0.4;
-    if (!diceOnSide) {
-      // Portrait : centre = mi-hauteur de la fiche (h = 2r)
+    // Off zone : center Y du prochain slot
+    if (diceOnSide) {
+      const h = r * 0.4, step = h + h, cy = by + 6.5*a;
+      const idx = mockState.turn === 'white' ? mockState.off.white : mockState.off.black;
+      const pos = idx % 8;
       return mockState.turn === 'white'
-        ? by + 13*a + r*1.6 + r
-        : by - r*1.6 - r;
+        ? cy + r + pos*step + h/2
+        : cy - r - pos*step - h/2;
     }
-    // Paysage : depuis l'axe central, blancs vers le bas, noirs vers le haut
-    const step = h + h;   // 0.8r (gap = hauteur d'une fiche)
-    const cy   = by + 6.5*a;
-    const idx  = mockState.turn === 'white' ? mockState.off.white : mockState.off.black;
-    const pos  = idx % 8;
-    if (mockState.turn === 'white') {
-      return cy + r + pos*step + h/2;
-    } else {
-      return cy - r - pos*step - h/2;
-    }
+    const G = offGeomPortrait();
+    return mockState.turn === 'white' ? G.yW + G.h/2 : G.yB + G.h/2;
   }
   const n    = abs(mockState.points[pt] || 0);
   const isBot = pt <= 12;
@@ -1016,11 +1200,11 @@ function drawCheckers() {
   const barIdx = drag.barIdx != null ? drag.barIdx : -1;
   for (let i = 0; i < mockState.bar.white; i++) {
     if (skipWhiteBar && i === barIdx) continue;
-    drawChecker(barCX, by + 6.5*a - r - i*a, true, false);
+    drawChecker(barCX, by + 6.5*a - r - i*a, true, false, false, C.bar);
   }
   for (let i = 0; i < mockState.bar.black; i++) {
     if (skipBlackBar && i === barIdx) continue;
-    drawChecker(barCX, by + 6.5*a + r + i*a, false, false);
+    drawChecker(barCX, by + 6.5*a + r + i*a, false, false, false, C.bar);
   }
 }
 
@@ -1037,20 +1221,69 @@ function drawStackOnPoint(pt, count, isWhite, skipN) {
   const isTarget = targets.includes(pt);
   const isSnapped = drag.snapPt === pt;
 
+  const bgCol = triColorForPoint(pt);
   for (let i = 0; i < visible; i++) {
     const cy = isBot ? by + 13*a - r - i*a : by + r + i*a;
     const isTop = (i === visible - 1);
     if (isTop && overflow > 0) {
       drawCheckerLabel(cx, cy, isWhite, `+${overflow}`);
     } else {
-      drawChecker(cx, cy, isWhite, isTop && (isTarget || isSnapped));
+      // En cas de stack avec overflow (+N), pas de symbole nortechico sur les
+      // pièces inférieures pour éviter la superposition avec le chiffre du label.
+      drawChecker(cx, cy, isWhite, isTop && (isTarget || isSnapped), overflow > 0, bgCol);
     }
   }
 }
 
-function drawChecker(cx, cy, isWhite, fiberOptic) {
+// Couleur du triangle au point pt (1-24). Reproduit l'alternance de drawBoard.
+function triColorForPoint(pt) {
+  if (pt < 1 || pt > 24) return null;
+  let dark;
+  if      (pt >=  1 && pt <=  6) dark = (pt % 2 === 1);  // pt impair = triA
+  else if (pt >=  7 && pt <= 12) dark = (pt % 2 === 0);  // pt pair   = triA
+  else if (pt >= 13 && pt <= 18) dark = (pt % 2 === 1);
+  else                            dark = (pt % 2 === 0);
+  return dark ? C.triA : C.triB;
+}
+
+function drawChecker(cx, cy, isWhite, fiberOptic, suppressMark, bgCol) {
   fill(isWhite ? C.offwhite : C.ruby); noStroke();
   ellipse(cx, cy, 2*r, 2*r);
+  // Theme 'nortechico' : symbole gravé sur les pièces white ET black.
+  // Couleur du symbole choisie pour rester VISIBLE :
+  //  - pièce white (claire) → couleur du triangle/bar (foncé) à 20 % → tint sombre
+  //  - pièce black (foncée) → couleur claire (offwhite) à 20 % → tint claire
+  // Le rendu garde le sens "fenêtre 20 % vers le board" pour le white ; pour le
+  // black on choisit l'inverse colorimétrique pour que le glyphe soit lisible.
+  if (!suppressMark && bgCol && typeof userNick !== 'undefined' && userNick === 'NORTECHICO') {
+    const markCol = isWhite ? bgCol : C.offwhite;
+    drawNortechicoMark(cx, cy, markCol);
+  }
+}
+
+// Symbole custom Norte Chico (U+F8FF dans la police nortechico) "translucide"
+// sur la pièce : on dessine le symbole avec la COULEUR DU FOND DU PLATEAU
+// (triangle ou bar) à 20 % d'opacité par-dessus la pièce — la pièce reste
+// opaque (pas de punch vers le backdrop canvas), seule la teinte du board
+// transparaît dans la forme du symbole. Centrage vertical micro-corrigé via
+// NORTECHICO_Y_NUDGE pour compenser l'ascender pixel-font.
+// Mirror : on re-flip localement pour que le glyphe reste orienté correctement.
+const NORTECHICO_GLYPH = '';
+// Nudge vertical : positif = descend, négatif = monte. La pixel-font place
+// le glyphe bas dans son em ; on remonte de −0.27·r (≈ ½ cellule pixel
+// supplémentaire au-delà de −0.20) pour bien centrer le symbole.
+const NORTECHICO_Y_NUDGE = -0.27;
+function drawNortechicoMark(cx, cy, bgCol) {
+  if (!fontLarge) return;
+  noStroke();
+  fill(red(bgCol), green(bgCol), blue(bgCol), Math.round(255 * 0.20));
+  textFont(fontLarge); textSize(r * 1.6); textAlign(CENTER, CENTER);
+  const cyOff = cy + r * NORTECHICO_Y_NUDGE;
+  if (mirrorMode) {
+    push(); translate(cx, cyOff); scale(-1, 1); text(NORTECHICO_GLYPH, 0, 0); pop();
+  } else {
+    text(NORTECHICO_GLYPH, cx, cyOff);
+  }
 }
 
 function drawCheckerLabel(cx, cy, isWhite, label) {
@@ -1085,13 +1318,21 @@ function pieceXY(pt, isWhite) {
       : { x: bx + 6.5*a, y: cy + r + (stackN - 1) * a };
   }
   if (pt === 0) {
+    // Off zone : position du prochain slot pour ce joueur (utilisé pour le
+    // flying checker, dessiné dans le flip mirror — donc coords board).
+    const idx = isWhite ? mockState.off.white : mockState.off.black;
     if (diceOnSide) {
-      const cy = by + 6.5*a;
-      return isWhite
-        ? { x: bx + 13*a + 2*r, y: cy + r + 2 }
-        : { x: bx + 13*a + 2*r, y: cy - r - 2 };
+      const w = 2*r, h = r*0.4, step = h + h, cy = by + 6.5*a;
+      const colW = w + r/2;
+      const x = bx + 13*a + r + Math.floor(idx/8)*colW + w/2;
+      const pos = idx % 8;
+      const y = isWhite ? cy + r + pos*step + h/2 : cy - r - pos*step - h/2;
+      return { x, y };
     }
-    return { x: bx + 13*a - r, y: isWhite ? by + 13*a + r*1.6 + r : by - r*1.6 - r };
+    const G = offGeomPortrait();
+    const x = G.x0 - G.w - idx * G.step + G.w/2;
+    const y = isWhite ? G.yW + G.h/2 : G.yB + G.h/2;
+    return { x, y };
   }
   return { x: ptCenterX(pt), y: ptTopY(pt) };
 }
@@ -1164,9 +1405,18 @@ function drawDraggedChecker() {
   noStroke();
   fill(0, 0, 0, 25);
   ellipse(drag.dispX + 2, drag.dispY + 3, 2*r + 8, 2*r + 8);
-  fill(isWhite ? C.offwhite : C.ruby);
+  // Couleur du fond pour le symbole nortechico (basée sur le point d'origine)
+  const dragBg  = drag.fromPt === 'bar' ? C.bar : triColorForPoint(drag.fromPt);
+  const showSym = dragBg && typeof userNick !== 'undefined' && userNick === 'NORTECHICO';
   for (let i = 0; i < N; i++) {
-    ellipse(drag.dispX, drag.dispY + dy * i * a, 2*r, 2*r);
+    const cx = drag.dispX;
+    const cy = drag.dispY + dy * i * a;
+    fill(isWhite ? C.offwhite : C.ruby);
+    ellipse(cx, cy, 2*r, 2*r);
+    if (showSym) {
+      const markCol = isWhite ? dragBg : C.offwhite;
+      drawNortechicoMark(cx, cy, markCol);
+    }
   }
 }
 
@@ -1335,6 +1585,7 @@ function mousePressed() {
     if (nb && mouseX >= nb.x && mouseX <= nb.x + nb.w
           && mouseY >= nb.y && mouseY <= nb.y + nb.h) {
       profileOverlay = player;
+      recentGamesScroll = 0;        // reset scroll à l'ouverture du profil
       return;
     }
   }
@@ -1444,11 +1695,13 @@ function mouseDragged() {
   drag.snapPt = null;
   for (const tpt of getValidTargets(drag.fromPt)) {
     if (tpt === 0) {
+      // Off zone : à droite du plateau (en board-coord, donc eMx)
       if (diceOnSide) {
         if (eMx > bx + 13*a) { drag.snapPt = 0; break; }
       } else {
-        if (mockState.turn === 'white' && mouseY > by + 13*a - r) { drag.snapPt = 0; break; }
-        if (mockState.turn === 'black' && mouseY < by + r)         { drag.snapPt = 0; break; }
+        // Portrait : pile en dessous du texte joueur (white) ou au-dessus (black)
+        if (mockState.turn === 'white' && mouseY > by + 13*a + r * 4) { drag.snapPt = 0; break; }
+        if (mockState.turn === 'black' && mouseY < by - r * 4)         { drag.snapPt = 0; break; }
       }
     } else {
       if (abs(eMx - ptCenterX(tpt)) <= a / 2) { drag.snapPt = tpt; break; }
@@ -1479,90 +1732,139 @@ function mouseReleased() {
   drag.numPieces = 1;
 }
 
-// ── Zone bearing off ──────────────────────────────────────────────────────────
+// ── Bearing off ─────────────────────────────────────────────────────────────
+// Layout style "horizontal" historique : fiches pivotées (0.4r × 2r) empilées
+// le long du bord droit du plateau, en allant vers la gauche.
+// Y des piles :
+//  - Portrait : 1/3 sous le bas du bloc info white (vers EXIT) ; 1/3 au-dessus
+//    du haut du bloc info black (vers haut canvas) — symétrique.
+//  - Paysage : axe central du plateau ; white descend, black monte.
+// Compteur (XX) à gauche de la dernière fiche, jusqu'à (15).
+// Si plus de place : on tronque les fiches mais (XX) affiche le vrai total.
+function offGeomPortrait() {
+  const w    = r * 0.4;
+  const h    = 2 * r;
+  const gap  = (r / 2) * 4/5;        // 0.4r → step = 0.8r
+  const step = w + gap;
+  const x0   = bx + 13*a;
+  const ds   = dieSize();
+  const exitH    = r * 1.4;
+  const exitTopY = windowHeight - r/2 - exitH;
+  const yWtextBot = by + 13*a + r*1.6 + ds;
+  const yBtextTop = by - ds - r*1.6;
+  const canvasTopSafe = r / 2;
+  // 1/3 de la distance — proche du texte, loin du bord
+  const yW = yWtextBot + (exitTopY - yWtextBot) / 3;
+  const yB = yBtextTop - (yBtextTop - canvasTopSafe) / 3 - h;
+  return { w, h, gap, step, x0, yW, yB };
+}
+
 function drawOff() {
   const canBearOff = drag.active && getValidTargets(drag.fromPt).includes(0);
   if (diceOnSide) drawOffLandscape(canBearOff);
   else            drawOffPortrait(canBearOff);
 }
 
-function drawOffLandscape(canBearOff) {
-  const ox   = bx + 13*a + r;   // gap r entre plateau et 1ʳᵉ fiche
-  const w    = 2*r;
-  const h    = r * 0.4;
-  const gap  = h;                // espace entre fiches = h (r*0.4)
-  const step = h + gap;          // 0.8r par fiche
-  const colW = w + r/2;          // largeur colonne + écart = 2.5r
-  const cy   = by + 6.5*a;       // axe central du plateau
+function drawOffPortrait(canBearOff) {
+  const G = offGeomPortrait();
+  const cntSize = r * 0.7;
+  const cntPad  = r * 0.4;
 
-  // i-ème fiche : colonne = floor(i/8), position dans col = i%8
-  function px(i) { return ox + floor(i/8)*colW; }
-  function yW(i) { return cy + r + (i%8)*step; }           // blancs vers le bas
-  function yB(i) { return cy - r - (i%8)*step - h; }       // noirs vers le haut
+  drawSideStack('white', C.offwhite, G.yW);
+  drawSideStack('black', C.ruby,     G.yB);
 
-  for (let i = 0; i < mockState.off.white; i++) {
-    fill(C.offwhite); noStroke();
-    rect(px(i), yW(i), w, h);
-  }
-  for (let i = 0; i < mockState.off.black; i++) {
-    fill(C.ruby); noStroke();
-    rect(px(i), yB(i), w, h);
-  }
-  if (canBearOff) {
-    const isW  = mockState.turn === 'white';
-    const idx  = isW ? mockState.off.white : mockState.off.black;
-    const base = isW ? C.offwhite : C.ruby;
-    noStroke(); fill(red(base), green(base), blue(base), 153);
-    rect(px(idx), isW ? yW(idx) : yB(idx), w, h);
+  function drawSideStack(player, color, y) {
+    const off       = mockState.off[player];
+    const showGhost = canBearOff && mockState.turn === player;
+    const totalDraw = off + (showGhost ? 1 : 0);
+    if (totalDraw === 0) return;
+
+    // Cap : combien de fiches tiennent + compteur avant le bord gauche du canvas
+    textFont(fontLarge); textSize(cntSize);
+    const cntStr   = '(' + String(off).padStart(2, '0') + ')';
+    const cntStrW  = textWidth('(15)');
+    const leftSafe = r / 2;
+    const availW   = G.x0 - leftSafe - cntStrW - cntPad;
+    const maxN     = Math.max(0, Math.min(15, Math.floor((availW + G.gap) / G.step)));
+    const visN     = Math.min(totalDraw, maxN);
+    const visOff   = Math.min(off, visN);
+    const visGhost = (visN > visOff) ? 1 : 0;
+
+    // Fiches réelles
+    fill(color); noStroke();
+    for (let i = 0; i < visOff; i++) {
+      rect(G.x0 - G.w - i * G.step, y, G.w, G.h);
+    }
+    // Fiche fantôme (prochain bear-off)
+    if (visGhost) {
+      fill(red(color), green(color), blue(color), 153);
+      rect(G.x0 - G.w - visOff * G.step, y, G.w, G.h);
+    }
+
+    // Compteur (XX) à gauche de la dernière fiche, centré verticalement
+    if (off >= 1) {
+      noStroke(); fill(C.ivory);
+      textFont(fontLarge); textSize(cntSize);
+      textAlign(RIGHT, CENTER);
+      const lastIdx = Math.max(0, (visOff + visGhost) - 1);
+      const lastX   = G.x0 - G.w - lastIdx * G.step;     // bord gauche dernière fiche
+      text(cntStr, lastX - cntPad, y + G.h / 2);
+      textAlign(LEFT, TOP);
+    }
   }
 }
 
-function drawOffPortrait(canBearOff) {
-  // Fiches pivotées 90° : 0.4r de large × 2r de haut
-  // Empilées droite → gauche, bord droit de la 1ʳᵉ fiche au bord du plateau
-  const w    = r * 0.4;
-  const h    = 2 * r;
-  const gap  = (r / 2) * 4/5;
-  const step = w + gap;
-  const x0   = bx + 13*a;
-  const MAX_OFF_VIS = 8;       // au-delà, afficher "+N" pour éviter chevauchement texte
+function drawOffLandscape(canBearOff) {
+  // Layout paysage historique : axe central, fiches 2r × 0.4r empilées
+  // verticalement, white vers le bas, black vers le haut. Compteur (XX) à
+  // l'extrémité de la pile, plafond max 15.
+  const w    = 2*r;
+  const h    = r * 0.4;
+  const gap  = h;
+  const step = h + gap;       // 0.8r
+  const colW = w + r/2;
+  const cy   = by + 6.5*a;
+  const ox   = bx + 13*a + r;
+  const cntSize = r * 0.7;
+  const cntPad  = r * 0.4;
 
-  function rx(i) { return x0 - w - i * step; }
+  drawSideStack('white', C.offwhite, true);
+  drawSideStack('black', C.ruby,     false);
 
-  const yW   = by + 13*a + r*1.6;
-  const yB   = by - r*1.6 - h;
-  const szN  = r * 1.4;        // même taille de référence que drawPlayerInfo
+  function drawSideStack(player, color, growDown) {
+    const off       = mockState.off[player];
+    const showGhost = canBearOff && mockState.turn === player;
+    const totalDraw = off + (showGhost ? 1 : 0);
+    if (totalDraw === 0) return;
 
-  function drawOffStack(off, y, fillColor, isWhiteSide) {
-    const visible = Math.min(off, MAX_OFF_VIS);
-    fill(fillColor); noStroke();
-    for (let i = 0; i < visible; i++) rect(rx(i), y, w, h);
-    if (off > MAX_OFF_VIS) {
-      const overflow = off - MAX_OFF_VIS;
-      // Centre horizontal de la pile visible
-      const stackCx = (rx(0) + rx(MAX_OFF_VIS - 1)) / 2 + w / 2;
-      // Label sous la pile (white, en bas) ou au-dessus (black, en haut)
-      // → évite le chevauchement avec le drapeau RESIGN qui est sur la ligne du nom
-      const labelY = isWhiteSide ? y + h + r * 0.3 : y - r * 0.3;
-      const vAlign = isWhiteSide ? TOP : BOTTOM;
-      textAlign(CENTER, vAlign); noStroke();
-      textFont(fontLarge); textSize(szN * 0.7);
-      fill(C.ivory);
-      text('+' + overflow, stackCx, labelY);
+    // 8 fiches par colonne, on tient sur 2 colonnes max → 16 ≥ 15
+    const visN     = Math.min(totalDraw, 15);
+    const visOff   = Math.min(off, visN);
+    const visGhost = (visN > visOff) ? 1 : 0;
+
+    function px(i) { return ox + Math.floor(i/8) * colW; }
+    function py(i) {
+      const pos = i % 8;
+      return growDown ? cy + r + pos*step : cy - r - pos*step - h;
     }
-  }
 
-  drawOffStack(mockState.off.white, yW, C.offwhite, true);
-  drawOffStack(mockState.off.black, yB, C.ruby,     false);
+    fill(color); noStroke();
+    for (let i = 0; i < visOff; i++) rect(px(i), py(i), w, h);
+    if (visGhost) {
+      fill(red(color), green(color), blue(color), 153);
+      rect(px(visOff), py(visOff), w, h);
+    }
 
-  // Fantôme : seulement si la prochaine fiche reste dans la zone visible
-  if (canBearOff) {
-    const isW  = mockState.turn === 'white';
-    const idx  = isW ? mockState.off.white : mockState.off.black;
-    if (idx < MAX_OFF_VIS) {
-      const base = isW ? C.offwhite : C.ruby;
-      noStroke(); fill(red(base), green(base), blue(base), 153);
-      rect(rx(idx), isW ? yW : yB, w, h);
+    if (off >= 1) {
+      noStroke(); fill(C.ivory);
+      textFont(fontLarge); textSize(cntSize);
+      const cntStr = '(' + String(off).padStart(2, '0') + ')';
+      const lastIdx = Math.max(0, (visOff + visGhost) - 1);
+      const cx = px(lastIdx) + w / 2;
+      const cntY = growDown ? py(lastIdx) + h + cntPad : py(lastIdx) - cntPad;
+      textAlign(CENTER, growDown ? TOP : BOTTOM);
+      text(cntStr, cx, cntY);
+      textAlign(LEFT, TOP);
     }
   }
 }
@@ -1685,18 +1987,30 @@ function drawPlayerInfo() {
     text(gameStr, cx, y);
     cx += textWidth('(9:99)');
 
-    // Drapeau RESIGN ⚐ inline après le timer (sur la même ligne).
-    // En IA : seulement côté LOCAL_PLAYER (peut abandonner à tout moment)
-    // En hot-seat : seulement côté joueur courant
+    // Cube de doublage + drapeau RESIGN inline après le timer (même ligne).
+    // Ordre : timer  [cube]  [drapeau]
+    // Le cube précède le drapeau (toujours visible, même avec un nom long en mobile).
     if (gameMode && !gameWinner) {
+      // Centre vertical commun (milieu visuel de la ligne PIP) + nudge pour
+      // recentrer cube/drapeau sur le baseline visuel du texte pixel-font.
+      textFont(fontSmall); textSize(szP);
+      const lineCY = y + (textAscent() + textDescent()) / 2 + szP * 0.12;
+
+      // ── Cube doublage ──
+      const cubeR  = szP * 0.55;
+      cx += r * 0.4;                  // espacement timer→cube (inchangé)
+      const cubeCX = cx + cubeR;
+      const cubeCY = lineCY;
+      drawDoublingCube(cubeCX, cubeCY, cubeR, player, isCurrent);
+      cx += cubeR * 2 + r * 0.4;      // espacement cube→drapeau doublé (0.2 → 0.4)
+
+      // ── Drapeau RESIGN ──
+      // En IA : seulement côté LOCAL_PLAYER (peut abandonner à tout moment)
+      // En hot-seat : seulement côté joueur courant
       const showFlag = aiMode ? (player === LOCAL_PLAYER) : (mockState.turn === player);
       if (showFlag) {
-        cx += r * 0.4;   // espacement après le timer
         const flagH = szP * 1.15;
-        // Centre vertical = milieu visuel du texte timer (ligne PIP)
-        textFont(fontSmall); textSize(szP);
-        const lineCY = y + (textAscent() + textDescent()) / 2;
-        const flagY  = lineCY - flagH / 2;
+        const flagY = lineCY - flagH / 2;
         textFont('Arial'); textSize(flagH); textAlign(LEFT, TOP);
         const flagW  = textWidth('⚐');
         const isHover = mouseX >= cx && mouseX <= cx + flagW
@@ -1819,15 +2133,8 @@ function drawNameAccessories(nameX, nameY, szN, player) {
   }
   if (!gameMode || gameWinner) return;
 
-  const totalNameW = nameBlockW[player] || 0;
-  const isCurrentTurn = mockState.turn === player;
-
-  // ── Cube X 1/2/4 ──
-  const cubeR = r * 0.5;
-  const cubeX = nameX + totalNameW + r * 0.4 + cubeR;
-  const cubeY = nameY + szN * 0.5;
-  drawDoublingCube(cubeX, cubeY, cubeR, player, isCurrentTurn);
-  // Drapeau RESIGN désormais affiché par drawSecondLine (sur la ligne du timer)
+  // Cube de doublage et drapeau RESIGN actif sont désormais dans drawSecondLine
+  // (à gauche du drapeau, sur la ligne du timer) — voir drawSecondLine.
 }
 
 // ── Doubling cube (R7) — caractères ❶ ❷ ❹ ────────────────────────────────────
@@ -1835,17 +2142,12 @@ function drawDoublingCube(cx, cy, rad, player, isCurrentTurn) {
   const v  = (typeof cubeValue !== 'undefined') ? cubeValue : 1;
   const ch = v === 1 ? '\u2776' : v === 2 ? '\u2777' : '\u2779';
 
-  // alpha de base 25% ; pendant son tour : pulsation 25% → 100% → 25%
-  let aMul = 0.25;
-  if (isCurrentTurn && cubePromised !== player && !modalState) {
-    const t = (millis() / 1000) % 2;
-    if      (t < 0.7) aMul = 0.25 + (t / 0.7) * 0.75;
-    else if (t < 1.4) aMul = 1.0;
-    else              aMul = 1.0 - ((t - 1.4) / 0.6) * 0.75;
-  }
-  const isHover = isCurrentTurn && cubePromised !== player && !modalState
-               && dist(mouseX, mouseY, cx, cy) <= rad;
-  if (isHover) aMul = 1;
+  // Variante "1 double par joueur" :
+  //  - chaque joueur a son propre cube indicateur, JAMAIS clignotant
+  //  - les deux affichent la même valeur (1, 2 ou 4)
+  //  - opacité 100 % tant que le joueur n'a pas utilisé son double, 50 % sinon
+  const used = (typeof cubeUsed !== 'undefined') && cubeUsed[player];
+  const aMul = used ? 0.5 : 1.0;
 
   noStroke();
   fill(red(C.ivory), green(C.ivory), blue(C.ivory), Math.round(255 * aMul));
@@ -1868,18 +2170,76 @@ function drawInfo() {
 }
 
 // ── Touch (délègue aux handlers souris, return false bloque scroll/zoom) ─────
-function touchStarted() { mousePressed();  return false; }
-function touchMoved()   { mouseDragged();  return false; }
-function touchEnded()   { mouseReleased(); return false; }
+function touchStarted() {
+  _hasTouched = true;
+  if (profileOverlay) {
+    // Si le doigt commence dans la zone du graphique → mode 'graph' (tooltip,
+    // pas de scroll). Sinon → mode 'scroll' du tableau. Le mode est verrouillé
+    // pour la durée du touch pour éviter le mélange des deux interactions.
+    const inChart = _chartZone
+      && mouseX >= _chartZone.x && mouseX <= _chartZone.x + _chartZone.w
+      && mouseY >= _chartZone.y - r * 0.5
+      && mouseY <= _chartZone.y + _chartZone.h + r * 0.5;
+    if (inChart) {
+      _touchMode = 'graph';
+      _scrollTouchY = null;
+    } else {
+      _touchMode = 'scroll';
+      _scrollTouchY = mouseY;
+    }
+    return false;
+  }
+  mousePressed(); return false;
+}
+function touchMoved() {
+  if (profileOverlay) {
+    if (_touchMode === 'scroll' && _scrollTouchY !== null) {
+      recentGamesScroll = Math.max(0, recentGamesScroll - (mouseY - _scrollTouchY));
+      _scrollTouchY = mouseY;
+    }
+    // En mode 'graph' : mouseX/mouseY suivent le doigt, le tooltip s'affiche
+    // automatiquement dans drawScorePolyline.
+    return false;
+  }
+  mouseDragged(); return false;
+}
+function touchEnded() {
+  if (profileOverlay) {
+    const wasGraph   = _touchMode === 'graph';
+    const movedScroll = _touchMode === 'scroll' && _scrollTouchY !== null
+                     && Math.abs(mouseY - _scrollTouchY) > 4;
+    _touchMode    = null;
+    _scrollTouchY = null;
+    if (!wasGraph && !movedScroll) { mouseReleased(); }
+    return false;
+  }
+  mouseReleased(); return false;
+}
+
+// Scroll molette / trackpad sur l'overlay profil
+function mouseWheel(event) {
+  if (profileOverlay) {
+    recentGamesScroll = Math.max(0, recentGamesScroll + event.delta);
+    return false;   // empêche le scroll de la page
+  }
+  return true;
+}
 
 // ── Raccourcis clavier ────────────────────────────────────────────────────────
 function keyPressed() {
-  if (key === '1') { gameMode = false; mockState = SCENARIOS.initial;    clearDice(); }
-  if (key === '2') { gameMode = false; mockState = SCENARIOS.midgame;    clearDice(); }
-  if (key === '3') { gameMode = false; mockState = SCENARIOS.bearingOff; clearDice(); }
-  if (key === '4') { gameMode = false; mockState = SCENARIOS.test1;      clearDice(); }
+  // Helper : recharge un scénario mock et propage le nickname utilisateur
+  function loadScenario(state) {
+    gameMode = false;
+    mockState = state;
+    if (typeof userNick !== 'undefined' && userNick) applyUserNick(userNick);
+    clearDice();
+  }
+  if (key === '1') { loadScenario(SCENARIOS.initial);    }
+  if (key === '2') { loadScenario(SCENARIOS.midgame);    }
+  if (key === '3') { loadScenario(SCENARIOS.bearingOff); }
+  if (key === '4') { loadScenario(SCENARIOS.test1);      }
   if (key === '5') { aiMode = false; startGame(); }              // Hot-seat
   if (key === 'i' || key === 'I') { aiMode = true;  startGame(); } // vs IA (joue black)
-  if (key === 'b' || key === 'B') { startBarEntryTest(); }       // Test barre
+  if (key === 'b' || key === 'B') { startBarEntryTest(); }       // Test barre (passe par startGame)
   if (key === 'm' || key === 'M') { newMatch(); }                // Nouvelle partie
 }
