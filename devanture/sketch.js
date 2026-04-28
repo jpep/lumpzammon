@@ -32,6 +32,8 @@ let _touchMode    = null;
 let _hasTouched   = false;
 // Zone du graphique de score (mise à jour à chaque frame par drawPlayerProfile)
 let _chartZone    = null;
+// Vrai si le tap courant a ouvert l'overlay profil (évite la fermeture immédiate)
+let _profileOpenedAtTouch = false;
 
 // Animation d'un mouvement (trajectoire parabolique) — visualisation pour IA / adversaire
 let flyingChecker = null;   // { from, to, isWhite, fromX, fromY, toX, toY, t0, dur, onDone }
@@ -886,20 +888,13 @@ function drawScorePolyline(profile, x, y, w, h) {
     const mm    = String(date.getMonth() + 1).padStart(2, '0');
     const dd    = String(date.getDate()).padStart(2, '0');
     const label = `(${score}) ${yyyy}/${mm}/${dd}`;
-    const txSz  = r * 0.825;             // ×1.5 pour meilleure lisibilité
-    textFont(fontSmall); textSize(txSz); textAlign(LEFT, BOTTOM);
-    const labW  = textWidth(label);
-
-    // Position : AU-DESSUS de la courbe au point hover, à droite si la place
-    // existe sinon à gauche. Espacement augmenté pour bien dégager la courbe.
-    const sideGap = r * 0.8;             // ×2 (était 0.4)
-    const yLift   = r * 0.7;             // ×~2.3 (était 0.3)
-    let tipX = mouseX + sideGap;
-    if (tipX + labW > x + w) tipX = mouseX - sideGap - labW;
-    const tipY = curveY - yLift;
-
+    const txSz  = r * 0.825;             // taille agrandie ×1.5
+    // Étiquette ancrée en BAS-DROITE du graphique, ne suit plus la courbe :
+    // évite tout chevauchement avec la polyligne. Les valeurs (score/date)
+    // varient selon la position du curseur ou du doigt (mobile).
+    textFont(fontSmall); textSize(txSz); textAlign(RIGHT, BOTTOM);
     fill(C.ivory);
-    text(label, tipX, tipY);
+    text(label, x + w, y + h);
     textAlign(LEFT, TOP);
   }
 }
@@ -1226,11 +1221,12 @@ function drawStackOnPoint(pt, count, isWhite, skipN) {
     const cy = isBot ? by + 13*a - r - i*a : by + r + i*a;
     const isTop = (i === visible - 1);
     if (isTop && overflow > 0) {
+      // Pièce du sommet portant le label "+N" : pas de symbole nortechico
+      // (drawCheckerLabel ne le dessine pas). Les pièces du dessous gardent
+      // leur symbole normalement.
       drawCheckerLabel(cx, cy, isWhite, `+${overflow}`);
     } else {
-      // En cas de stack avec overflow (+N), pas de symbole nortechico sur les
-      // pièces inférieures pour éviter la superposition avec le chiffre du label.
-      drawChecker(cx, cy, isWhite, isTop && (isTarget || isSnapped), overflow > 0, bgCol);
+      drawChecker(cx, cy, isWhite, isTop && (isTarget || isSnapped), false, bgCol);
     }
   }
 }
@@ -1965,10 +1961,18 @@ function drawPlayerInfo() {
     ellipse(cx + padDotL + dotR, dotCY, dotR * 2, dotR * 2);
     cx += padDotL + dotR * 2 + padDotR;
 
+    // Opacité des minuteurs :
+    //  - hors gameMode (scénarios statiques [1][2][3][4]) ou pendant l'opening
+    //    roll → tous translucides (aucun joueur n'est encore "actif")
+    //  - en gameMode normal : 255 pour le timer actif du joueur courant, 128
+    //    pour tous les autres
+    const inOpening = (typeof openingActive !== 'undefined' && openingActive);
+    const liveTimer = useDyn && !inOpening && isCurrent;
+
     // (MM) move timer — largeur fixe basée sur "(99)"
     textFont(fontSmall); textSize(szP);
     const moveStr = '(' + String(moveLeft).padStart(2, '0') + ')';
-    const aMove   = (!isCurrent || active === 'move') ? 255 : 128;
+    const aMove   = liveTimer ? (active === 'move' ? 255 : 128) : 128;
     fill(red(C.ivory), green(C.ivory), blue(C.ivory), aMove);
     text(moveStr, cx, y);
     cx += textWidth('(99)');
@@ -1982,7 +1986,7 @@ function drawPlayerInfo() {
     const mins = Math.floor(gameSec / 60);
     const secs = gameSec % 60;
     const gameStr = '(' + mins + ':' + String(secs).padStart(2, '0') + ')';
-    const aGame   = (!isCurrent || active === 'game') ? 255 : 128;
+    const aGame   = liveTimer ? (active === 'game' ? 255 : 128) : 128;
     fill(red(C.ivory), green(C.ivory), blue(C.ivory), aGame);
     text(gameStr, cx, y);
     cx += textWidth('(9:99)');
@@ -2049,7 +2053,10 @@ function drawPlayerInfo() {
     return x + totalW;
   } */
 
-  // Dessine : NAME ⁽elo⁾ (sessionScore) — superscript entre le nom et le score session
+  // Dessine : NAME ⁽elo⁾ [(sessionScore)]
+  // En PORTRAIT le score session (X) est déplacé près du dé gauche (sous pour
+  // white, au-dessus pour black) et n'est PAS ajouté à la suite du nom ici.
+  // En PAYSAGE on le garde inline après le nom comme avant.
   function drawNameLeft(baseName, sessionScore, x, y, player) {
     textAlign(LEFT, TOP);
     fill(C.ivory); noStroke();
@@ -2061,7 +2068,6 @@ function drawPlayerInfo() {
     cx += textWidth(baseName);
 
     // Superscript : score multijoueur cumulé (somme des deltas du tableau profil)
-    // Cohérent avec l'affichage entre parenthèses dans le profil joueur.
     const mpScore = (typeof getMultiplayerScore === 'function')
       ? getMultiplayerScore(player) : 0;
     const mpSign  = mpScore > 0 ? '+' : '';
@@ -2071,14 +2077,45 @@ function drawPlayerInfo() {
     text(mpStr, cx, y);
     cx += textWidth(mpStr);
 
-    // Score session (taille normale)
-    textSize(szN);
-    text(` (${sessionScore})`, cx, y);
-    cx += textWidth(` (${sessionScore})`);
+    // Score session (X) — inline UNIQUEMENT en paysage. En portrait, voir
+    // drawSessionScoreNearDie() ci-dessous.
+    if (diceOnSide) {
+      textSize(szN);
+      text(` (${sessionScore})`, cx, y);
+      cx += textWidth(` (${sessionScore})`);
+    }
 
     nameBlockW[player] = cx - x;
     // Zone cliquable sur le bloc nom (ouvre l'overlay profil joueur)
     nameBtns[player] = { x, y, w: cx - x, h: szN, player };
+  }
+
+  // En portrait : place le score session (X) à mi-chemin entre le bord du dé
+  // GAUCHE et le bord de l'écran correspondant :
+  //   - white (en bas) : entre le bas du dé blanc et le bas du canvas
+  //   - black (en haut) : entre le haut du dé noir et le haut du canvas
+  // Centré horizontalement sur le dé gauche, à la même taille que le nom.
+  function drawSessionScoreNearDie(player, sessionScore) {
+    if (diceOnSide) return;
+    const ds  = dieSize();
+    const die = getDiePos(player, 0);   // dé idx 0 = dé gauche
+    const dieCX = die.x + ds / 2;
+    const txt = `(${sessionScore})`;
+    textFont(fontLarge); textSize(szN);
+    fill(C.ivory); noStroke();
+    textAlign(CENTER, CENTER);
+    let cy;
+    if (player === 'white') {
+      const dieBot   = die.y + ds;
+      const screenBot = windowHeight;
+      cy = (dieBot + screenBot) / 2;
+    } else {
+      const dieTop   = die.y;
+      const screenTop = 0;
+      cy = (dieTop + screenTop) / 2;
+    }
+    text(txt, dieCX, cy);
+    textAlign(LEFT, TOP);
   }
 
   // Reset des zones cliquables (recalculées plus bas)
@@ -2115,6 +2152,10 @@ function drawPlayerInfo() {
     drawSecondLine(tx, yWhiteTop + szN + gap, pipW, 'white');
     drawNameAccessories(tx, yBlackTop, szN, 'black');
     drawNameAccessories(tx, yWhiteTop, szN, 'white');
+    // Score session (X) déplacé près du dé gauche en portrait :
+    // black au-dessus du dé haut, white sous le dé bas.
+    drawSessionScoreNearDie('black', sB);
+    drawSessionScoreNearDie('white', sW);
   }
 }
 
@@ -2172,6 +2213,7 @@ function drawInfo() {
 // ── Touch (délègue aux handlers souris, return false bloque scroll/zoom) ─────
 function touchStarted() {
   _hasTouched = true;
+  _profileOpenedAtTouch = false;
   if (profileOverlay) {
     // Si le doigt commence dans la zone du graphique → mode 'graph' (tooltip,
     // pas de scroll). Sinon → mode 'scroll' du tableau. Le mode est verrouillé
@@ -2189,7 +2231,12 @@ function touchStarted() {
     }
     return false;
   }
-  mousePressed(); return false;
+  // Overlay fermé : le tap peut ouvrir l'overlay (clic sur le nom). On le
+  // mémorise pour ne pas refermer aussitôt au touchEnded.
+  const wasOpen = !!profileOverlay;
+  mousePressed();
+  if (!wasOpen && profileOverlay) _profileOpenedAtTouch = true;
+  return false;
 }
 function touchMoved() {
   if (profileOverlay) {
@@ -2208,9 +2255,14 @@ function touchEnded() {
     const wasGraph   = _touchMode === 'graph';
     const movedScroll = _touchMode === 'scroll' && _scrollTouchY !== null
                      && Math.abs(mouseY - _scrollTouchY) > 4;
+    const justOpened = _profileOpenedAtTouch;
     _touchMode    = null;
     _scrollTouchY = null;
-    if (!wasGraph && !movedScroll) { mouseReleased(); }
+    _profileOpenedAtTouch = false;
+    // Tap sans mouvement notable, hors graphique, et qui n'a pas servi à OUVRIR
+    // l'overlay → traité comme un clic (close, signout ou EXIT). Sinon on ne
+    // fait rien (sinon on fermerait l'overlay aussitôt après l'avoir ouvert).
+    if (!wasGraph && !movedScroll && !justOpened) { mousePressed(); }
     return false;
   }
   mouseReleased(); return false;
