@@ -912,14 +912,16 @@ function drawModal() {
   const cy = windowHeight / 2;
   fill(255); textAlign(CENTER, CENTER);
 
+  // Espacement entre la question et les boutons YES/NO doublé (était 2.4r → 4.8r)
+  // Question centrée à cy - 2.4r, boutons à cy + 2.4r → écart total 4.8r symétrique
   if (modalState.type === 'offer') {
     if (fontLarge) textFont(fontLarge);
     textSize(r * 1.1 * MSG_SCALE);
-    text('Offer double?', cx, cy - r * 1.6);
+    text('Offer double?', cx, cy - r * 2.4);
 
     textSize(r * 1.0 * MSG_SCALE);
     const dx = r * 3;
-    const yY = cy + r * 0.8;
+    const yY = cy + r * 2.4;
     text('YES', cx - dx, yY);
     text('NO',  cx + dx, yY);
     modalBtns = {
@@ -930,11 +932,11 @@ function drawModal() {
   } else if (modalState.type === 'resign') {
     if (fontLarge) textFont(fontLarge);
     textSize(r * 1.1 * MSG_SCALE);
-    text('Resign current game?', cx, cy - r * 1.6);
+    text('Resign current game?', cx, cy - r * 2.4);
 
     textSize(r * 1.0 * MSG_SCALE);
     const dx = r * 3;
-    const yY = cy + r * 0.8;
+    const yY = cy + r * 2.4;
     text('YES', cx - dx, yY);
     text('NO',  cx + dx, yY);
     modalBtns = {
@@ -945,11 +947,11 @@ function drawModal() {
   } else if (modalState.type === 'quit') {
     if (fontLarge) textFont(fontLarge);
     textSize(r * 1.1 * MSG_SCALE);
-    text('Quit current game?', cx, cy - r * 1.6);
+    text('Quit current game?', cx, cy - r * 2.4);
 
     textSize(r * 1.0 * MSG_SCALE);
     const dx = r * 3;
-    const yY = cy + r * 0.8;
+    const yY = cy + r * 2.4;
     text('YES', cx - dx, yY);
     text('NO',  cx + dx, yY);
     modalBtns = {
@@ -1018,10 +1020,32 @@ function drawGameOver() {
 }
 
 // ── Smooth drag (vitesse d'accroche / 2) ─────────────────────────────────────
+// Multi-pickup : la pièce du curseur (au bas de la pile traînée pour une source
+// BOT, au haut pour une source TOP) doit s'aimanter à un slot tel que les
+// AUTRES pièces du groupe restent DANS le plateau. Quand source et destination
+// n'ont pas la même orientation (BOT→TOP ou TOP→BOT), on décale le snap de
+// (N−1)·a dans la direction de la destination pour que le groupe entier rentre
+// sans déborder du bord supérieur ou inférieur.
 function updateDragDisplay() {
   const tx = drag.snapPt !== null ? ptCenterX(drag.snapPt) : drag.mouseX;
-  const ty = drag.snapPt !== null ? ptNextY(drag.snapPt)   : drag.mouseY;
-  drag.dispX = lerp(drag.dispX, tx, 0.13);   // 0.09 → 0.13 : légèrement plus fort
+  let ty;
+  if (drag.snapPt !== null) {
+    ty = ptNextY(drag.snapPt);
+    if (typeof drag.snapPt === 'number' && drag.snapPt >= 1 && drag.snapPt <= 24) {
+      const N = drag.numPieces || 1;
+      if (N > 1) {
+        const isBotSrc  = (drag.fromPt !== 'bar') && (drag.fromPt <= 12);
+        const isBotDest = drag.snapPt <= 12;
+        if (isBotSrc !== isBotDest) {
+          // Décalage vers le côté du board où le groupe doit s'étendre
+          ty += (isBotDest ? -1 : 1) * (N - 1) * a;
+        }
+      }
+    }
+  } else {
+    ty = drag.mouseY;
+  }
+  drag.dispX = lerp(drag.dispX, tx, 0.13);
   drag.dispY = lerp(drag.dispY, ty, 0.13);
 }
 
@@ -1333,9 +1357,33 @@ function pieceXY(pt, isWhite) {
   return { x: ptCenterX(pt), y: ptTopY(pt) };
 }
 
+// Position d'ATTERRISSAGE d'une pièce sur un point de destination — différente
+// de pieceXY qui retourne la position de la pièce du sommet déjà existante.
+// - Sur un point board : slot suivant (ou slot 0 si la cible est vide ou si on hit).
+// - Sur la barre        : juste au-dessus des pièces déjà sur la barre.
+// - Sur off (pt=0)      : pieceXY retourne déjà la position du prochain slot.
+function landingXY(toPt, isWhite, hit) {
+  if (toPt === 0) return pieceXY(0, isWhite);
+  if (toPt === 'bar') {
+    const n  = isWhite ? mockState.bar.white : mockState.bar.black;
+    const cy = by + 6.5 * a;
+    return isWhite
+      ? { x: bx + 6.5 * a, y: cy - r - n * a }
+      : { x: bx + 6.5 * a, y: cy + r + n * a };
+  }
+  let nDest = Math.abs(mockState.points[toPt] || 0);
+  if (hit) nDest = Math.max(0, nDest - 1);    // la pièce mangée est retirée avant l'arrivée
+  const isBot = toPt <= 12;
+  const visN  = Math.min(nDest, MAX_STACK);
+  return {
+    x: ptCenterX(toPt),
+    y: isBot ? by + 13*a - r - visN * a : by + r + visN * a,
+  };
+}
+
 function startFlyingChecker(fromPt, toPt, isWhite, onDone, hit, diceValue, intermediatePts) {
   const a0 = pieceXY(fromPt, isWhite);
-  const a1 = pieceXY(toPt,   isWhite);
+  const a1 = landingXY(toPt, isWhite, hit);   // ← position réelle d'atterrissage
   // hit = { pt, isWhite } : pièce mangée à toPt (fade out simultané)
   // diceValue = valeur du dé consommé (fade en sync avec l'anim)
   // intermediatePts = liste des points intermédiaires d'un mouvement combiné (cercles vides)
@@ -1361,16 +1409,58 @@ function drawFlyingChecker() {
     if (cb) cb();
     return;
   }
-  // Animation : fade out (départ) + fade in (arrivée), courbe smoothstep pour subtilité
   const t   = elapsed / fc.dur;
-  const ts  = t * t * (3 - 2 * t);
+  const ts  = t * t * (3 - 2 * t);                 // smoothstep
   const col = fc.isWhite ? C.offwhite : C.ruby;
   const cR  = red(col), cG = green(col), cB = blue(col);
   noStroke();
-  fill(cR, cG, cB, Math.round(255 * (1 - ts)));
-  ellipse(fc.fromX, fc.fromY, 2*r, 2*r);
-  fill(cR, cG, cB, Math.round(255 * ts));
-  ellipse(fc.toX, fc.toY, 2*r, 2*r);
+
+  // Animation par GLISSEMENT : la pièce se déplace de fromXY → toXY à pleine
+  // opacité, sans fade. Pour ne pas passer "au-dessus" des pièces empilées
+  // sur les points intermédiaires, la trajectoire est légèrement courbée :
+  //  - même demi-plateau (top↔top ou bot↔bot) : bulge vers le centre du
+  //    plateau (les piles sont sur les bords) → contourne les pièces comme
+  //    le ferait un doigt
+  //  - traverse la barre verticale : léger HOP supplémentaire pour visualiser
+  //    le passage au-dessus de la barre
+  const barX  = bx + 6.5 * a;
+  const fromRight = fc.fromX > barX;
+  const toRight   = fc.toX > barX;
+  const crossesBar = fromRight !== toRight;
+
+  const midY    = by + 6.5 * a;
+  const fromTop = fc.fromY < midY;
+  const toTop   = fc.toY   < midY;
+  const sameHalf = fromTop === toTop;
+
+  const px = fc.fromX + (fc.toX - fc.fromX) * ts;
+  let py   = fc.fromY + (fc.toY - fc.fromY) * ts;
+
+  // Bulge vers le centre si même demi-plateau (sinon trajet passe déjà au milieu)
+  if (sameHalf) {
+    const bulge = a * 1.5;                  // amplitude du contournement
+    py += (fromTop ? 1 : -1) * 4 * bulge * ts * (1 - ts);
+  }
+  // Hop additionnel si on traverse la barre verticale
+  if (crossesBar) {
+    const lift = r * 0.7;
+    py -= 4 * lift * ts * (1 - ts);
+  }
+
+  // Pièce volante à pleine opacité (plus de fade source/destination)
+  fill(cR, cG, cB);
+  ellipse(px, py, 2*r, 2*r);
+  // Theme nortechico : conserve le symbole pendant le glissement
+  if (typeof userNick !== 'undefined' && userNick === 'NORTECHICO') {
+    // Couleur de fond approximative : on prend le triangle du point d'origine
+    // si pt valide, sinon C.bar.
+    const fromBg = (typeof fc.from === 'number') ? triColorForPoint(fc.from) : C.bar;
+    if (fromBg) {
+      const markCol = fc.isWhite ? fromBg : C.offwhite;
+      drawNortechicoMark(px, py, markCol);
+    }
+  }
+
   // Pièce mangée : fade out simultané à sa position
   if (fc.hit) {
     const hCol = fc.hit.isWhite ? C.offwhite : C.ruby;
