@@ -141,14 +141,23 @@ function updateDiceAnim() {
     }
 
     if (sf >= SETTLE_FRAMES) {
-      // Dédoublonnage : garder une seule boule par pip
+      // Dédoublonnage : garder une seule boule par pip ET snap exact sur la
+      // position cible. Sinon, plusieurs boules en quasi-coïncidence dessinent
+      // un "blob" légèrement plus large qu'un cercle unique → on perçoit un
+      // micro-changement de taille au moment du dédoublonnage. Le snap aligne
+      // précisément la boule restante sur la position du pip pour éviter ça.
       for (const die of diceAnim.dice) {
         if (!die) continue;
         const seen = new Set();
         for (const b of die.balls) {
           const key = `${b.tnx},${b.tny}`;
-          if (seen.has(key)) b.active = false;
-          else seen.add(key);
+          if (seen.has(key)) {
+            b.active = false;
+          } else {
+            b.nx = b.tnx;        // snap exact pour éliminer le micro-offset résiduel
+            b.ny = b.tny;
+            seen.add(key);
+          }
         }
       }
       diceAnim.state = DS.DONE;
@@ -178,11 +187,12 @@ function drawAllDice() {
 // Un dé visuel est "fade" (alpha 25%) quand sa contribution est entièrement consommée.
 // Non-double : dé i est fade si sa valeur n'est plus dans gameState.moves
 // Double (4 mvts) : dé visuel 0 fade quand 2 mvts joués, dé 1 quand 4 mvts joués
-// R3 : si noMovesNotice actif pour ce joueur, les 2 dés sont fade
+// noMovesNotice actif → on NE fade PAS, on garde les dés en surbrillance pour
+// indiquer clairement qu'aucun coup n'est possible.
 function isDieFaded(dieIdx, player) {
   if (typeof noMovesNotice !== 'undefined'
       && noMovesNotice.active
-      && noMovesNotice.owner === player) return true;
+      && noMovesNotice.owner === player) return false;
   if (!gameMode || !gameState) return false;
   if (mockState.turn !== player) return false;   // pas de fade côté adversaire
   const initial   = gameState.dice  || [];

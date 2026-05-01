@@ -377,13 +377,47 @@ function endTurn() {
   rollAndStart(nextPl);
 }
 
+// Détecte si le joueur a des pièces sur la barre ET que les 6 points d'entrée
+// sont tous bloqués (2+ fiches adverses) → aucun jet ne peut servir.
+function isBarThrowImpossible(pl) {
+  if (!gameState || !gameState.bar) return false;
+  if (gameState.bar[pl] === 0) return false;
+  const opp = pl === 1 ? 2 : 1;
+  for (let die = 1; die <= 6; die++) {
+    const idx = pl === 1 ? 24 - die : die - 1;   // jpep 0-indexé
+    const e = gameState.pts[idx];
+    const blocked = e.p === opp && e.n >= 2;
+    if (!blocked) return false;
+  }
+  return true;
+}
+
 function rollAndStart(nextPl) {
+  const turnColor = nextPl === 1 ? 'white' : 'black';
+
+  // Court-circuit : barre + toutes entrées bloquées → pas de jet, juste les
+  // cadres vides en surbrillance, puis on passe.
+  if (isBarThrowImpossible(nextPl)) {
+    gameState.dice  = [];
+    gameState.moves = [];
+    syncMockState();
+    clearDice();                 // diceAnim → EMPTY (cadres vides en surbrillance)
+    hasOwnedDice[turnColor] = true;
+    startTurnTimer();
+    _passCount++;
+    noMovesNotice = { active: true, owner: turnColor };
+    setTimeout(() => {
+      noMovesNotice = { active: false, owner: null };
+      endTurn();
+    }, 1500);
+    return;
+  }
+
   const newDice   = Logic.rollDice();
   gameState.dice  = newDice;
   gameState.moves = [...newDice];
   syncMockState();
   clearDice();
-  const turnColor = nextPl === 1 ? 'white' : 'black';
   startRoll(newDice, turnColor);
   hasOwnedDice[turnColor] = true;
   startTurnTimer();
@@ -710,19 +744,25 @@ function startBarEntryTest() {
   gameState.bar = { 1: 0, 2: 0 };
   gameState.off = { 1: 0, 2: 0 };
 
-  // Quelques pièces pour contextualiser
-  gameState.pts[0]  = { n: 2, p: 2 };  // pt  1 : 2 noires (coin)
-  gameState.pts[5]  = { n: 3, p: 1 };  // pt  6 : 3 blanches
-  gameState.pts[11] = { n: 2, p: 2 };  // pt 12 : 2 noires
-  gameState.pts[18] = { n: 3, p: 2 };  // pt 19 : 3 noires (home)
-  // Case bloquée : pt 21 (jpep idx 20) → 2 noires bloquent le dé 4
-  gameState.pts[20] = { n: 2, p: 2 };
-  // Case libre  : pt 22 (jpep idx 21) → entrée avec dé 3 possible
+  // Scénario : barre NOIRE TOTALEMENT BLOQUÉE — c'est le tour de l'IA, donc
+  // on voit DIRECTEMENT le comportement "pas de jet, cadres vides en
+  // surbrillance, pass au tour suivant" déclenché par l'opposant.
+  // Black entre depuis la barre sur les points 1-6 (jpep idx 0-5).
+  // Pour tout bloquer : 2+ blanches sur CHACUN des 6 points (12 fiches).
+  for (let i = 0; i <= 5; i++) gameState.pts[i] = { n: 2, p: 1 };  // 12 blanches sur pts 1-6
+  // 3 blanches restantes (5+3+12 = ne marche pas, ajustons)
+  gameState.pts[7]  = { n: 3, p: 1 };  // pt  8 : 3 blanches → total 12+3 = 15 ✓
+  // Quelques noires pour contextualiser (black n'a pas perdu)
+  gameState.pts[18] = { n: 5, p: 2 };  // pt 19 : 5 noires (home black)
+  gameState.pts[16] = { n: 4, p: 2 };  // pt 17 : 4 noires
+  gameState.pts[12] = { n: 5, p: 2 };  // pt 13 : 5 noires (= 14 + 1 barre)
+  // 14 + 1 = 15 noires ✓
 
-  gameState.bar[1] = 1;   // 1 fiche blanche sur la barre
-  gameState.turn   = 1;
-  gameState.dice   = [3, 4];
-  gameState.moves  = [3, 4];
+  gameState.bar[2] = 1;   // 1 fiche noire sur la barre
+  gameState.turn   = 2;   // tour de l'opposant (black)
+  gameState.dice   = [];
+  gameState.moves  = [];
+  aiMode = true;          // active mode IA pour que black soit l'IA
 
   mockState = {
     points:  new Array(25).fill(0),
@@ -740,6 +780,8 @@ function startBarEntryTest() {
 
   syncMockState();
   clearDice();
-  startRoll([3, 4], 'white');
-  startTurnTimer();
+  // Lance via le flow normal : rollAndStart pour BLACK (l'opposant). Le check
+  // isBarThrowImpossible va déclencher : pas de jet, cadres vides en surbrillance,
+  // puis pass automatique vers white.
+  rollAndStart(2);
 }

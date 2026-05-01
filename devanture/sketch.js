@@ -71,6 +71,28 @@ const ROOM_PLAYERS = [
 ];
 
 let fontLarge, fontSmall, fontMed;
+// Chaîne CSS de fallback pour les noms : nortechico (pixel) FORCÉ en premier,
+// puis Noto Sans pour les caractères qu'il n'a pas. Le browser pioche
+// par-caractère ; nortechico est déclaré explicitement en @font-face dans
+// index.html pour garantir qu'il soit toujours résolu en premier.
+const NAME_FONT_CSS =
+  "'nortechico','nortechico 100','nortechico-100','Noto Sans','Noto Sans JP','Noto Sans SC','Noto Sans Arabic',sans-serif";
+
+// Helper : dessine un nom (avec fallback Noto Sans) directement via le canvas
+// 2D context (bypass de p5 textFont qui ne gère pas la chaîne CSS multi-fonte).
+// Retourne la largeur réellement mesurée pour que l'appelant chaîne les segments.
+function drawNameText(name, x, y, sz, col, baseline) {
+  const ctx = drawingContext;
+  ctx.save();
+  ctx.font         = `${sz}px ${NAME_FONT_CSS}`;
+  ctx.textAlign    = 'left';
+  ctx.textBaseline = baseline || 'top';
+  ctx.fillStyle    = `rgb(${red(col)},${green(col)},${blue(col)})`;
+  ctx.fillText(name, x, y);
+  const w = ctx.measureText(name).width;
+  ctx.restore();
+  return w;
+}
 
 
 // ── Palette globale (accessible depuis dice.js) ───────────────────────────────
@@ -80,7 +102,7 @@ let dominantHue = 0;   // extrait du fond au setup (mis à jour à chaque nouvel
 
 // Pool de fonds — l'un est tiré aléatoirement à chaque nouvelle partie (touche [m])
 const FOND_LIST = ['fond.jpg', 'fond0.jpg', 'fond1.jpg', 'fond2.jpg',
-                   'fond4.jpg', 'fond5.jpg', 'fond6.jpg'];
+                   'fond4.jpg'];
 let currentFond = 'fond.jpg';
 let mirrorMode  = false;   // bascule l'orientation des fiches d'une partie à l'autre
 
@@ -164,7 +186,8 @@ let drag = {
 };
 
 // ── Géométrie responsive ──────────────────────────────────────────────────────
-const NAMES_W_A = 7;   // largeur réservée à droite (a-units) pour nom + super + score + cube + drapeau + RESIGN?
+const NAMES_W_A = 9;   // largeur réservée à droite (a-units) pour nom + super + score + cube + drapeau
+                       // (passé de 7 à 9 pour accueillir des nicknames plus longs en paysage)
 
 function computeGeometry() {
   diceOnSide = windowWidth >= windowHeight * 1.1;   // paysage → dés à gauche
@@ -178,6 +201,9 @@ function computeGeometry() {
     const totalA = 13 + 2 * sideA;
     const totalH = 13 + 1.2;
     a  = min(maxW / totalA, maxH / totalH);
+    // Sur desktop large (paysage en taille de fenêtre pleine), réduire de 20%
+    // l'ensemble pour aérer le rendu et garder un rapport agréable au vide.
+    if (windowWidth >= 900) a *= 0.80;
     r  = a / 2;
     bx = (windowWidth  - 13*a) / 2;
     by = (windowHeight - 13*a) / 2;
@@ -347,7 +373,10 @@ function createSigninInput() {
   signinInputEl.style.textAlign   = 'center';
   signinInputEl.style.textTransform = 'uppercase';
   signinInputEl.style.letterSpacing = '0.05em';
-  signinInputEl.style.fontFamily  = 'monospace';
+  // PIX (nortechico) par défaut, fallback Noto Sans par-caractère pour JP/CN/AR…
+  // Le navigateur sélectionne automatiquement la bonne fonte selon ce que tape
+  // le clavier client (pas besoin d'inspecter la locale manuellement).
+  signinInputEl.style.fontFamily  = NAME_FONT_CSS;
   signinInputEl.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') { e.preventDefault(); submitSignin(); }
   });
@@ -407,20 +436,18 @@ function drawDoublePromiseNotice() {
     if (alpha <= 0) return;
   }
 
-  // Position : symétrique par rapport à l'axe central du plateau, AU-DESSUS
-  // des infos de l'adversaire (c'est lui qu'on challenge avec le double).
-  // Distance : 1/3 entre le haut du bloc info adverse et le bord supérieur du canvas.
+  // Position : au-dessus des infos de l'adversaire (c'est lui qu'on challenge).
   const cx = windowWidth / 2;
   let cy;
   const canvasTopSafe = r / 2;
   if (diceOnSide) {
-    // Paysage : adversaire à droite, blocs noir et blanc s'opposent verticalement.
-    // On place la notice à 1/3 entre le haut du plateau et le bord supérieur du canvas.
+    // Paysage : 1/3 entre le haut du plateau et le bord supérieur du canvas.
     cy = canvasTopSafe + (by - canvasTopSafe) * 2 / 3;
   } else {
-    // Portrait : 1/3 au-dessus du haut du bloc info BLACK
-    const yBtextTop = by - dieSize() - r*1.6;
-    cy = yBtextTop - (yBtextTop - canvasTopSafe) / 3;
+    // Portrait : à mi-distance entre le score (X) (= die.y / 2) et le bord
+    // SUPÉRIEUR des dés noirs (= die.y) → notice = die.y * 3/4.
+    const yBtextTop = by - dieSize() - r*1.6;   // = top des dés noirs
+    cy = yBtextTop * 0.75;
   }
   noStroke();
   fill(red(C.ivory), green(C.ivory), blue(C.ivory), Math.round(255 * alpha));
@@ -462,7 +489,7 @@ function drawExitButton() {
     x = windowWidth  - r/2 - totalW;
     y = windowHeight - r/2 - sz;
   } else {
-    // Portrait : centré, r/2 du bord bas
+    // Portrait : centré, bas à r/2 du bord inférieur (entièrement visible)
     x = (windowWidth - totalW) / 2;
     y = windowHeight - r/2 - sz;
   }
@@ -568,15 +595,14 @@ function drawPlayerProfile() {
   noStroke(); fill(0, 0, 0, 210);
   rect(0, 0, windowWidth, windowHeight);
 
-  // Cadre = rectangle du plateau (comme drawRoom)
-  noFill(); stroke(C.ivory); strokeWeight(1.5);
-  rect(bx, by, 13*a, 13*a);
-
   // ── Nom (gros, en haut) ────────────────────────────────────────────────────
+  // Note : le cadre (encadrement ivoire) est dessiné en DERNIER, avec une
+  // hauteur calculée dynamiquement pour s'arrêter juste après le graphique
+  // (la table et le bouton SIGN OUT sont placés EN DEHORS du cadre, en bas).
   noStroke(); fill(C.ivory);
   if (fontLarge) textFont(fontLarge);
   textAlign(LEFT, TOP);
-  const padX  = r * 1.2;          // marge interne gauche
+  const padX  = r * 4;            // marge interne 4r ↔ encadrement (3r + r demandé)
   const padY  = r * 0.8;          // marge interne haute
   const innerX = bx + padX;
   const innerW = 13*a - 2*padX;
@@ -585,8 +611,8 @@ function drawPlayerProfile() {
   const baseName = (mockState.players && mockState.players[player])
                 || (player === 'white' ? 'WHITE' : 'BLACK');
   const szName  = r * 2.4;
-  textSize(szName);
-  text(baseName, innerX, yCur);
+  // Fallback Noto Sans pour caractères non-PIX (JP/CN/AR…) — via ctx direct
+  drawNameText(baseName, innerX, yCur, szName, C.ivory, 'top');
   yCur += szName * 1.1;
 
   // ── Ligne 2 : (mpScoreCumulé) gros + XX% + 🥧 + total + 📊 + #RANK ─────────
@@ -651,6 +677,12 @@ function drawPlayerProfile() {
   drawScorePolyline(profile, innerX, yCur, innerW, chartH);
   yCur += chartH + szLine * 1.8;   // marge 1.8 pour titre futur
 
+  // ── Cadre (encadrement) — couvre tout le rectangle du plateau (13a × 13a),
+  // contient l'ensemble du contenu (header + chart + table). Seul le bouton
+  // SIGN OUT est placé EN DEHORS, juste sous le cadre.
+  noFill(); stroke(C.ivory); strokeWeight(1.5);
+  rect(bx, by, 13*a, 13*a);
+
   // ── Tableau dernières parties ──────────────────────────────────────────────
   // 4 colonnes : ↑+N / ↓-N | You(score) | P - O (résultat monoespacé) | Adversaire(rank)
   // La colonne delta est à gauche du nom du joueur. Le résultat affiche les points
@@ -669,6 +701,7 @@ function drawPlayerProfile() {
   textFont(fontLarge);
   textSize(tableTextSize);
   textAlign(LEFT, TOP);
+  noStroke();   // évite que le stroke ivoire du chart/cadre dessine un contour autour des caractères
 
   // Largeurs fixes pour monoespacement du résultat (jusqu'à 2 chiffres / côté)
   const digitsW = textWidth('00');
@@ -677,10 +710,10 @@ function drawPlayerProfile() {
   const resTotW = digitsW + dashW + digitsW;
   const resStart = innerX + colDelta + colYou + Math.max(0, (colRes - resTotW) / 2);
 
-  // Zone scrollable des parties : commence à yCur, s'étend jusqu'au bas du cadre
-  // (avec marge pour le bouton SIGN OUT en bas).
+  // Zone scrollable des parties : commence à yCur (sous le graphique), s'étend
+  // jusqu'au bas du cadre (le SIGN OUT est dessiné après, hors du cadre).
   const tableTopY = yCur;
-  const tableBotY = by + 13*a - r * 2.4;     // réserve sous le tableau pour SIGN OUT
+  const tableBotY = by + 13*a - padY - 2*r;   // +2r d'espace vide jusqu'au bord inférieur du cadre (r supplémentaire demandé)
   // Hauteur totale "logique" du contenu et bornes de scroll
   const games = profile.recentGames || [];
   const totalH = games.length * rowH;
@@ -765,21 +798,19 @@ function drawPlayerProfile() {
   drawingContext.restore();
   yCur = tableBotY;     // sortie de la zone scrollable
 
-  // ── SIGN OUT (uniquement sur son propre profil) ────────────────────────────
-  // Bouton visible centré en bas du cadre du plateau. Click → reset localStorage + signin.
+  // ── SIGN OUT (LOCAL_PLAYER uniquement, EN DEHORS du cadre, en dessous) ────
   signoutBtn = null;
   if (player === LOCAL_PLAYER) {
     const sz = szLine * 1.10;
     textFont(fontLarge); textSize(sz);
     fill(C.ivory);
-    textAlign(CENTER, BOTTOM);
+    textAlign(CENTER, TOP);
     const label = '[ SIGN OUT ]';
     const w = textWidth(label);
-    const h = sz;
-    const bx2 = bx + 13*a / 2;                  // centre X du plateau
-    const by2 = by + 13*a - r * 0.6;            // près du bas du cadre
-    text(label, bx2, by2);
-    signoutBtn = { x: bx2 - w/2, y: by2 - h, w, h };
+    const cx = bx + 13*a / 2;
+    const sy = by + 13*a + szLine * 0.6;          // juste sous le cadre
+    text(label, cx, sy);
+    signoutBtn = { x: cx - w/2, y: sy, w, h: sz };
     textAlign(LEFT, TOP);
   }
 }
@@ -1051,102 +1082,239 @@ function updateDragDisplay() {
 
 // ── Plateau ───────────────────────────────────────────────────────────────────
 function drawBoard() {
+  const SW = 2;   // épaisseur unique pour tous les contours du plateau
+
   // Fond tablier (sans contour)
   noStroke();
   fill(C.board);
   rect(bx, by, 13*a, 13*a);
-  // Contour entièrement à l'extérieur (offset = strokeWeight) pour ne pas chevaucher les fiches
-  noFill();
-  stroke(C.ivory);
-  strokeWeight(1.5);
-  rect(bx - 0.75, by - 0.75, 13*a + 1.5, 13*a + 1.5);
 
+  // Barre — fill SANS contour (pour éviter le double-trait au top/bottom où
+  // ça chevaucherait avec le contour du plateau). Les bords verticaux sont
+  // dessinés ensuite comme des lignes simples.
+  fill(C.bar);
+  noStroke();
+  rect(bx + 6*a, by, a, 13*a);
+
+  // Triangles — pt passé pour que chaque triangle ait un léger décalage de phase
+  // dans son halo (rappel visuel que les options sont indépendantes).
   const targets = drag.active ? getValidTargets(drag.fromPt) : [];
-
   for (let i = 0; i < 6; i++) {
     const dark = (i % 2 === 0);
-    drawTri(bx + (12-i)*a, by + 13*a, true,  dark, targets.includes(1+i),  drag.snapPt === 1+i);
-    drawTri(bx + (5-i)*a,  by + 13*a, true,  !dark, targets.includes(7+i),  drag.snapPt === 7+i);
-    drawTri(bx + i*a,      by,         false, dark, targets.includes(13+i), drag.snapPt === 13+i);
-    drawTri(bx + (7+i)*a,  by,         false, !dark, targets.includes(19+i), drag.snapPt === 19+i);
+    drawTri(bx + (12-i)*a, by + 13*a, true,  dark,  targets.includes(1+i),  drag.snapPt === 1+i,  1+i);
+    drawTri(bx + (5-i)*a,  by + 13*a, true,  !dark, targets.includes(7+i),  drag.snapPt === 7+i,  7+i);
+    drawTri(bx + i*a,      by,         false, dark,  targets.includes(13+i), drag.snapPt === 13+i, 13+i);
+    drawTri(bx + (7+i)*a,  by,         false, !dark, targets.includes(19+i), drag.snapPt === 19+i, 19+i);
   }
 
-  // Barre
-  fill(C.bar);
+  // Contours en DERNIER (pour rester au-dessus des triangles).
+  // Bords verticaux de la barre + contour extérieur du plateau, à la même
+  // épaisseur SW, pour éviter toute surépaisseur résiduelle.
   stroke(C.ivory);
-  strokeWeight(1.5);
-  rect(bx + 6*a, by, a, 13*a);
+  strokeWeight(SW);
+  noFill();
+  // Contour extérieur (entièrement à l'extérieur du fond)
+  rect(bx - SW/2, by - SW/2, 13*a + SW, 13*a + SW);
+  // Lignes verticales de la barre seulement (haut/bas couverts par le contour)
+  line(bx + 6*a,     by, bx + 6*a,     by + 13*a);
+  line(bx + 6*a + a, by, bx + 6*a + a, by + 13*a);
 }
 
-// ── Triangle + fibre optique ──────────────────────────────────────────────────
-function drawTri(x, baseY, pointUp, isDark, isTarget, isSnapped) {
+// ── Triangle "staircase" : demi-palier base + 6 paliers symétriques ────────
+// Variation visuelle : pas de contour, juste la couleur de remplissage.
+// 7 layers du bas vers la pointe :
+//   0 : demi-palier base, lower half  → h=a/2, w=1a    (touche les triangles adjacents)
+//   1 : demi-palier base, upper half  → h=a/2, w=9/10a (crée un trait creux léger)
+//   2 : palier 2                       → h=a,   w=5/6a
+//   3 : palier 3                       → h=a,   w=2/3a
+//   4 : palier 4                       → h=a,   w=1/2a
+//   5 : palier 5                       → h=a,   w=1/3a
+//   6 : palier 6 (pointe)              → h=a,   w=1/6a
+// Total : a/2 + a/2 + 5a = 6a (= hauteur d'origine).
+// Highlight subtil (target/snap) : halo blanc qui balaie la base vers la pointe
+// avec une amplitude douce et un cycle long.
+const TRI_LAYERS = [
+  { wA: 1,     hA: 0.5 },   // 0 — base lower half
+  { wA: 19/20, hA: 0.5 },   // 1 — base upper half (trait creux fin : 0.05a d'inset)
+  { wA: 5/6,   hA: 1.0 },   // 2
+  { wA: 2/3,   hA: 1.0 },   // 3
+  { wA: 1/2,   hA: 1.0 },   // 4
+  { wA: 1/3,   hA: 1.0 },   // 5
+  { wA: 1/6,   hA: 1.0 },   // 6 — pointe
+];
+
+function drawTri(x, baseY, pointUp, isDark, isTarget, isSnapped, pt) {
+  noStroke();
   fill(isDark ? C.triA : C.triB);
-  stroke(C.ivory);
-  strokeWeight(1);
 
-  const h  = 6*a;
-  const cx = x + a/2;
-  let p1, p2, tip;
+  const cx = x + a / 2;
 
-  if (pointUp) {
-    p1  = createVector(x,    baseY);
-    p2  = createVector(x+a,  baseY);
-    tip = createVector(cx,   baseY - h);
-  } else {
-    p1  = createVector(x,    baseY);
-    p2  = createVector(x+a,  baseY);
-    tip = createVector(cx,   baseY + h);
+  // Y du top de chaque layer (cumul des hauteurs depuis la base)
+  function layerTopY(i) {
+    let off = 0;
+    for (let k = 0; k <= i; k++) off += TRI_LAYERS[k].hA * a;
+    return pointUp ? baseY - off : baseY + off - TRI_LAYERS[i].hA * a;
   }
 
-  triangle(p1.x, p1.y, p2.x, p2.y, tip.x, tip.y);
+  // Dessin des layers (couleur de remplissage uniquement)
+  for (let i = 0; i < TRI_LAYERS.length; i++) {
+    const w = TRI_LAYERS[i].wA * a;
+    const h = TRI_LAYERS[i].hA * a;
+    rect(cx - w / 2, layerTopY(i), w, h);
+  }
 
-  // ── Halo glissant le long des arêtes, clipé à chaque segment ──
+  // Halo (target/snap) : périmètre en zigzag + glow point animé qui parcourt
+  // l'arête (logique reprise de la version standard, adaptée à l'escalier).
   if (isTarget || isSnapped) {
-    const speed   = 200;                      // px/s — constant
-    const segHalf = 2 * r;                   // demi-longueur halo = 2r (total 4r)
-    const sw      = 3.0;
-
-    const segs    = [[tip, p2], [p2, p1], [p1, tip]];
-    const lengths = segs.map(([u, v]) => p5.Vector.dist(u, v));
-    const total   = lengths.reduce((s, l) => s + l, 0);
-
-    function drawGlowPoint(tPos) {
-      let rem = tPos, si = 0;
-      for (; si < segs.length - 1; si++) {
-        if (rem <= lengths[si]) break;
-        rem -= lengths[si];
+    // ── 1. Construction du périmètre en zigzag autour de l'escalier ─────
+    // Vertices ordonnés en partant du coin bas-droit, en remontant la droite
+    // palier par palier, en traversant la pointe, puis en redescendant la
+    // gauche en miroir jusqu'au coin bas-gauche. La base ferme la boucle
+    // (segment implicite verts[N-1] → verts[0]).
+    const sgn = pointUp ? -1 : 1;     // pointUp : Y décroît vers le haut
+    const verts = [];
+    // Coin de base, côté droit
+    verts.push({ x: cx + TRI_LAYERS[0].wA / 2 * a, y: baseY });
+    // Côté droit : on monte palier par palier
+    let cumOff = 0;
+    for (let i = 0; i < TRI_LAYERS.length; i++) {
+      cumOff += TRI_LAYERS[i].hA * a;
+      const topY = baseY + sgn * cumOff;
+      // Haut du palier i, bord droit
+      verts.push({ x: cx + TRI_LAYERS[i].wA / 2 * a, y: topY });
+      // Marche horizontale vers l'intérieur (vers le palier suivant, plus étroit)
+      if (i < TRI_LAYERS.length - 1) {
+        verts.push({ x: cx + TRI_LAYERS[i + 1].wA / 2 * a, y: topY });
       }
-      const [u, v] = segs[si];
-      const len = lengths[si];
-      const g0  = Math.max(0, rem - segHalf);
-      const g1  = Math.min(len, rem + segHalf);
-      if (g1 <= g0) return;
+    }
+    // Sommet de la pointe : traversée horizontale vers la gauche
+    const tipY = baseY + sgn * 6 * a;
+    verts.push({ x: cx - TRI_LAYERS[TRI_LAYERS.length - 1].wA / 2 * a, y: tipY });
+    // Côté gauche : on redescend palier par palier en miroir
+    cumOff = 6 * a;
+    for (let i = TRI_LAYERS.length - 1; i >= 0; i--) {
+      cumOff -= TRI_LAYERS[i].hA * a;
+      const botY = baseY + sgn * cumOff;
+      verts.push({ x: cx - TRI_LAYERS[i].wA / 2 * a, y: botY });
+      // Marche horizontale vers l'extérieur (vers le palier précédent, plus large)
+      if (i > 0) {
+        verts.push({ x: cx - TRI_LAYERS[i - 1].wA / 2 * a, y: botY });
+      }
+    }
+    // verts[N-1] = (cx - 0.5a, baseY) — coin bas-gauche.
+    // Le segment implicite verts[N-1] → verts[0] est la base (bord du bas).
 
-      const ptA = p5.Vector.lerp(u, v, g0 / len);
-      const ptB = p5.Vector.lerp(u, v, g1 / len);
-      const ct  = (rem - g0) / (g1 - g0);   // centre dans [0,1]
-      const al  = 0.85;
+    const N = verts.length;
+    const lens = [];
+    let total = 0;
+    for (let i = 0; i < N; i++) {
+      const u = verts[i], v = verts[(i + 1) % N];
+      const L = Math.hypot(v.x - u.x, v.y - u.y);
+      lens.push(L);
+      total += L;
+    }
 
-      const grad = drawingContext.createLinearGradient(ptA.x, ptA.y, ptB.x, ptB.y);
-      grad.addColorStop(0,  'rgba(245,240,218,0)');
-      grad.addColorStop(ct, `rgba(245,240,218,${al})`);
-      grad.addColorStop(1,  'rgba(245,240,218,0)');
+    const cR = red(C.ivory), cG = green(C.ivory), cB = blue(C.ivory);
 
-      drawingContext.save();
+    // ── 2. Contour fin TOUJOURS visible (lueur de base discrète sur le bord)
+    // Garantit que la cible soit identifiable dès le pickup même quand le
+    // glow point est sur l'autre face de l'escalier.
+    drawingContext.save();
+    drawingContext.beginPath();
+    drawingContext.moveTo(verts[0].x, verts[0].y);
+    for (let i = 1; i < N; i++) drawingContext.lineTo(verts[i].x, verts[i].y);
+    drawingContext.closePath();
+    drawingContext.lineWidth   = 1.0;
+    drawingContext.lineJoin    = 'miter';
+    drawingContext.strokeStyle = `rgba(${cR},${cG},${cB},${isSnapped ? 0.22 : 0.13})`;
+    drawingContext.stroke();
+    drawingContext.restore();
+
+    // ── 3. Glow point animé qui parcourt le périmètre (2 points, 180° d'écart)
+    // Le halo peut s'étendre sur plusieurs segments courts (les marches font
+    // souvent < segHalf) — on dessine donc segment par segment en propageant
+    // l'alpha autour du pic.
+    const speed   = 200;                    // px/s le long du périmètre
+    const segHalf = r * 1.8;                // demi-longueur du halo : périmètre d'action étendu
+    const sw      = 1.05;                   // +5% par rapport au contour de base : surbrillance à peine plus marquée
+    const peakA   = isSnapped ? 1.0 : 0.85;
+    const phaseOff = (typeof pt === 'number') ? (((pt - 1) * 7) % 24) / 24 : 0;
+    const t0 = ((millis() / 1000 * speed) % total + phaseOff * total) % total;
+    const t1 = (t0 + total / 2) % total;
+
+    function drawSubSeg(segIdx, gA, gB, alphaA, alphaB) {
+      if (gB <= gA) return;
+      const u = verts[segIdx], v = verts[(segIdx + 1) % N];
+      const len = lens[segIdx];
+      if (len <= 0) return;
+      const ax = u.x + (v.x - u.x) * gA / len;
+      const ay = u.y + (v.y - u.y) * gA / len;
+      const bx2 = u.x + (v.x - u.x) * gB / len;
+      const by2 = u.y + (v.y - u.y) * gB / len;
+      const grad = drawingContext.createLinearGradient(ax, ay, bx2, by2);
+      grad.addColorStop(0, `rgba(${cR},${cG},${cB},${alphaA})`);
+      grad.addColorStop(1, `rgba(${cR},${cG},${cB},${alphaB})`);
       drawingContext.strokeStyle = grad;
-      drawingContext.lineWidth   = sw;
-      drawingContext.lineCap     = 'round';
       drawingContext.beginPath();
-      drawingContext.moveTo(ptA.x, ptA.y);
-      drawingContext.lineTo(ptB.x, ptB.y);
+      drawingContext.moveTo(ax, ay);
+      drawingContext.lineTo(bx2, by2);
       drawingContext.stroke();
+    }
+
+    function drawGlowAt(tPos) {
+      // Localise le segment qui contient tPos
+      let rem = tPos, si = 0;
+      for (; si < N; si++) {
+        if (rem <= lens[si]) break;
+        rem -= lens[si];
+      }
+      if (si >= N) si = N - 1;
+      drawingContext.save();
+      drawingContext.lineCap   = 'round';
+      drawingContext.globalCompositeOperation = 'lighter';
+
+      function paintTrail(lw, alphaScale) {
+        drawingContext.lineWidth = lw;
+        // Propage en arrière le long du périmètre (alpha décroît)
+        let walked = 0, segIdx = si, pos = rem;
+        while (walked < segHalf) {
+          const stepLen = Math.min(pos, segHalf - walked);
+          if (stepLen > 0) {
+            const aNear = peakA * alphaScale * (1 - walked / segHalf);
+            const aFar  = peakA * alphaScale * (1 - (walked + stepLen) / segHalf);
+            drawSubSeg(segIdx, pos - stepLen, pos, aFar, aNear);
+            walked += stepLen;
+            pos    -= stepLen;
+          }
+          if (walked >= segHalf) break;
+          segIdx = (segIdx - 1 + N) % N;
+          pos    = lens[segIdx];
+        }
+        // Propage en avant
+        walked = 0; segIdx = si; pos = rem;
+        while (walked < segHalf) {
+          const stepLen = Math.min(lens[segIdx] - pos, segHalf - walked);
+          if (stepLen > 0) {
+            const aNear = peakA * alphaScale * (1 - walked / segHalf);
+            const aFar  = peakA * alphaScale * (1 - (walked + stepLen) / segHalf);
+            drawSubSeg(segIdx, pos, pos + stepLen, aNear, aFar);
+            walked += stepLen;
+            pos    += stepLen;
+          }
+          if (walked >= segHalf) break;
+          segIdx = (segIdx + 1) % N;
+          pos    = 0;
+        }
+      }
+
+      paintTrail(sw * 3.5, 0.22);  // halo large, additif → rayonnement
+      paintTrail(sw,       1.0);   // cœur du trait
+
       drawingContext.restore();
     }
 
-    const t0 = (millis() / 1000 * speed) % total;
-    const t1 = (t0 + total / 2) % total;   // second halo, côté opposé
-    drawGlowPoint(t0);
-    drawGlowPoint(t1);
+    drawGlowAt(t0);
+    drawGlowAt(t1);
   }
 }
 
@@ -2152,10 +2320,10 @@ function drawPlayerInfo() {
     fill(C.ivory); noStroke();
     let cx = x;
 
-    // Nom (taille normale)
-    textFont(fontLarge); textSize(szN);
-    text(baseName, cx, y);
-    cx += textWidth(baseName);
+    // Nom (taille normale) — fallback Noto Sans pour caractères non-PIX (JP/CN/AR…)
+    // On bypasse p5 textFont (qui ne gère pas une chaîne CSS multi-fonte)
+    // et on dessine directement via ctx.fillText.
+    cx += drawNameText(baseName, cx, y, szN, C.ivory, 'top');
 
     // Superscript : score multijoueur cumulé (somme des deltas du tableau profil)
     const mpScore = (typeof getMultiplayerScore === 'function')
