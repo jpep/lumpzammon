@@ -23,9 +23,25 @@
       src: url('fonts/nortechico-60.otf') format('opentype');
       font-display: block;
     }
+    /* nortechico-80 : poids intermédiaire (utilisé par le titre G⌂MM⌂N
+       de l'intro / menu / sign-in). */
+    @font-face {
+      font-family: 'nortechico-80';
+      src: url('fonts/nortechico-80.otf') format('opentype');
+      font-display: block;
+    }
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
-      background: #1a1a2e url('fond.jpg') center center / cover no-repeat;
+      /* Fond initial NOIR (image image-less) : empêche que fond.jpg ne flash
+         AVANT que le canvas ne soit prêt à dessiner le voile sombre + GOMMAN
+         de l'intro. L'image de fond est posée par JS (sketch.js setup() /
+         preload). On garde les propriétés de positionnement (center / cover
+         / no-repeat) en CSS pour qu'elles s'appliquent dès que JS pose
+         l'image — sinon on hérite des défauts (top-left, auto, repeat). */
+      background-color: #000;
+      background-position: center center;
+      background-size: cover;
+      background-repeat: no-repeat;
       display: flex;
       justify-content: center;
       align-items: center;
@@ -38,11 +54,11 @@
 </head>
 <body>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.4/p5.min.js"></script>
-  <script src="mockState.js?v=150"></script>
-  <script src="game/logic_standalone.js?v=150"></script>
-  <script src="game/ai_standalone.js?v=150"></script>
-  <script src="adapter.js?v=150"></script>
-  <script src="dice.js?v=150"></script>
-  <script src="sketch.js?v=150"></script>
+  <script src="mockState.js?v=222"></script>
+  <script src="game/logic_standalone.js?v=222"></script>
+  <script src="game/ai_standalone.js?v=222"></script>
+  <script src="adapter.js?v=222"></script>
+  <script src="dice.js?v=222"></script>
+  <script src="sketch.js?v=222"></script>
 </body>
 </html>

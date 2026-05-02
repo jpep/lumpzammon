@@ -204,14 +204,60 @@ function winPoints(type) {
   return type === 'backgammon' ? 3 : type === 'gammon' ? 2 : 1;
 }
 
+// ── Enregistrement des statistiques en fin de partie ─────────────────────────
+// Appelé pour TOUS les types de fin (normale, resign, quit-to-room) afin que
+// chaque partie incrémente totalGames et soit ajoutée en tête de recentGames
+// pour les deux joueurs.
+//   winnerColor : 'white' | 'black'
+//   winType     : 'simple' | 'gammon' | 'backgammon' | 'resign'
+function recordGameToProfile(winnerColor, winType) {
+  if (typeof PLAYER_PROFILES === 'undefined') return;
+  const loserColor = winnerColor === 'white' ? 'black' : 'white';
+  const points = (winType === 'resign' ? 1 : winPoints(winType)) * cubeValue;
+  const playedAt = new Date().toISOString();
+  const winnerOpp = (mockState.players && mockState.players[loserColor])  || loserColor.toUpperCase();
+  const loserOpp  = (mockState.players && mockState.players[winnerColor]) || winnerColor.toUpperCase();
+  if (PLAYER_PROFILES[winnerColor]) {
+    const p = PLAYER_PROFILES[winnerColor];
+    p.totalGames  = (p.totalGames || 0) + 1;
+    p.recentGames = p.recentGames || [];
+    p.recentGames.unshift({
+      youScore: gameScore[winnerColor],
+      oppScore: gameScore[loserColor],
+      opponent: winnerOpp,
+      delta:   +points,
+      playedAt,
+    });
+  }
+  if (PLAYER_PROFILES[loserColor]) {
+    const p = PLAYER_PROFILES[loserColor];
+    p.totalGames  = (p.totalGames || 0) + 1;
+    p.recentGames = p.recentGames || [];
+    p.recentGames.unshift({
+      youScore: gameScore[loserColor],
+      oppScore: gameScore[winnerColor],
+      opponent: loserOpp,
+      delta:   -points,
+      playedAt,
+    });
+  }
+}
+
 // ── Finaliser une étape de mouvement ─────────────────────────────────────────
 function finalizeMoveStep() {
+  // Mode LEARN : marque que white a joué un coup, ce qui arrête la boucle
+  // de la vague de contraste (sens 24 → 1) sur ses triangles.
+  if (typeof gameState !== 'undefined' && gameState && gameState.turn === 1
+      && typeof learnWhiteHasMoved !== 'undefined') {
+    learnWhiteHasMoved = true;
+  }
   const winner = Logic.checkWin(gameState);
   if (winner) {
     gameWinner  = winner;
     gameWinType = classifyWin(gameState, winner);
     const key   = winner === 1 ? 'white' : 'black';
     gameScore[key] += winPoints(gameWinType) * cubeValue;
+    recordGameToProfile(key, gameWinType);
     syncMockState();
     return;   // partie terminée, ne pas enchaîner
   }
@@ -323,6 +369,8 @@ function resetTimers() {
 
 function startTurnTimer() {
   if (!gameMode || gameWinner) return;
+  // Mode LEARN : pas de timer, le joueur prend tout son temps pour apprendre.
+  if (typeof isLearnMode === 'function' && isLearnMode()) return;
   timerState.moveLeft = 15;
   timerState.active   = 'move';
   if (!_timerInterval) _timerInterval = setInterval(tickTimer, 1000);
@@ -406,10 +454,12 @@ function rollAndStart(nextPl) {
     startTurnTimer();
     _passCount++;
     noMovesNotice = { active: true, owner: turnColor };
+    // En LEARN : pause prolongée pour laisser le temps de lire le tip "no moves"
+    const learnNoMovesDur = (typeof isLearnMode === 'function' && isLearnMode()) ? 3500 : 1500;
     setTimeout(() => {
       noMovesNotice = { active: false, owner: null };
       endTurn();
-    }, 1500);
+    }, learnNoMovesDur);
     return;
   }
 
@@ -427,6 +477,10 @@ function rollAndStart(nextPl) {
   if (vm.length === 0 && _passCount < 2) {
     _passCount++;
     const ownerName = nextPl === 1 ? 'white' : 'black';
+    // Délais prolongés en LEARN pour laisser le temps de lire le tip "no moves"
+    const inLearn = (typeof isLearnMode === 'function' && isLearnMode());
+    const readDur = inLearn ? 1800 : 800;
+    const passDur = inLearn ? 2500 : 900;
     // Phase 1 : attendre que l'animation des dés soit posée
     const waitDone = () => {
       if (typeof diceAnim !== 'undefined' && diceAnim.state !== 'done') {
@@ -441,8 +495,8 @@ function rollAndStart(nextPl) {
         setTimeout(() => {
           noMovesNotice = { active: false, owner: null };
           endTurn();
-        }, 900);
-      }, 800);
+        }, passDur);
+      }, readDur);
     };
     waitDone();
   } else {
@@ -455,18 +509,52 @@ function rollAndStart(nextPl) {
 }
 
 // Poll l'état de l'animation des dés ; quand DONE, déclenche playAITurn.
+// En LEARN : on attend ÉGALEMENT que tout tip pédagogique en cours soit
+// dismissé par le joueur, et on rallonge le délai final pour laisser le
+// temps de comprendre la situation avant que l'IA enchaîne.
+// Pour le PREMIER tour de l'IA en LEARN, on déclenche EN PLUS deux boucles
+// de la vague de contraste dans le sens INVERSE (1 → 24) AVANT que l'IA
+// ne joue, pour montrer au débutant que les sens d'avancement sont opposés.
+let _learnFirstAITriggered = false;
 function waitForDiceThenAITurn() {
   if (!gameMode || gameWinner) return;
+  // Note : on N'ATTEND PLUS la fermeture des tips LEARN — les tips
+  // s'auto-dismiss après LEARN_TIP_DUR ; l'IA enchaîne sans bloquer
+  // l'utilisateur (qui peut agir dès la fin du message).
   if (typeof diceAnim !== 'undefined' && diceAnim.state !== 'done') {
     setTimeout(waitForDiceThenAITurn, 80);
     return;
   }
-  setTimeout(playAITurn, 350);   // petit délai pour que le user voie les dés posés
+  // Premier tour AI en LEARN : déclenche 2 boucles de vague INVERSE
+  // (sens 1 → 24, opposé à white) + un tip explicatif, puis joue l'IA.
+  if (!_learnFirstAITriggered
+      && typeof isLearnMode === 'function' && isLearnMode()
+      && typeof learnTipsShown !== 'undefined' && learnTipsShown
+      && !learnTipsShown.blackDirection) {
+    _learnFirstAITriggered = true;
+    learnTipsShown.blackDirection = true;
+    if (typeof startLearnDirectionAnim === 'function') {
+      startLearnDirectionAnim('black', 2);     // 2 boucles dans le sens 1 → 24
+    }
+    if (typeof showLearnTip === 'function') {
+      showLearnTip("OPPONENT MOVES 1 → 24.");  // sens INVERSE de white
+    }
+    // Total = 2 boucles + 1 pause entre les deux
+    const loopDur = (typeof LEARN_DIRECTION_DUR !== 'undefined') ? LEARN_DIRECTION_DUR : 2400;
+    const pauseDur = (typeof LEARN_DIRECTION_PAUSE !== 'undefined') ? LEARN_DIRECTION_PAUSE : 1200;
+    const totalDur = loopDur * 2 + pauseDur;
+    setTimeout(playAITurn, totalDur + 200);
+    return;
+  }
+  const learnDelay = (typeof isLearnMode === 'function' && isLearnMode()) ? 1800 : 350;
+  setTimeout(playAITurn, learnDelay);
 }
 
 // ── Tour de l'IA (joue black, P2) — moves animés un par un, fusionnés par pièce ─
 function playAITurn() {
   if (!gameMode || !aiMode || gameWinner) return;
+  // Note : pas de gating sur les tips LEARN ici — ils s'auto-dismiss et
+  // l'IA peut enchaîner immédiatement après son action.
   if (mockState.turn !== 'black') return;
   if (modalState) return;
   const result = AI.aiPlay(gameState, 2);
@@ -501,10 +589,24 @@ function playAITurn() {
     const g = groups[i];
     const fromPt = g.from === 'bar' ? 'bar' : g.from + 1;
     const toPt   = g.to   === 'off' ? 0    : g.to   + 1;
-    // Détection hit : pièce blanche seule à la destination (mangée par l'IA)
+    // Détection hit : pièce blanche seule (= blot) à n'importe quelle
+    // destination du groupe — y compris les points INTERMÉDIAIRES d'un
+    // mouvement combiné. Sinon les hits sur intermédiaires (ex. : black
+    // joue 5+3, hit à l'étape +5) étaient ratés et l'animation ne se
+    // déclenchait pas. On simule l'application séquentielle des sous-moves
+    // pour vérifier l'état au moment de chaque étape, puis on garde le
+    // premier hit rencontré (le plus proche du départ visuellement).
     let hit = null;
-    if (g.to !== 'off' && gameState.pts[g.to].p === 1 && gameState.pts[g.to].n === 1) {
-      hit = { pt: toPt, isWhite: true };
+    let simState = gameState;
+    for (const m of g.moves) {
+      if (m.t !== 'off' && simState.pts[m.t]
+          && simState.pts[m.t].p === 1 && simState.pts[m.t].n === 1) {
+        hit = { pt: m.t + 1, isWhite: true };
+        break;
+      }
+      // Simule l'application pour le check du sous-move suivant.
+      try { simState = Logic.applyMove(simState, 2, m); }
+      catch (e) { break; }
     }
     // Première valeur de dé du groupe (utilisée pour synchroniser le fade du dé)
     const firstDiceValue = g.moves[0].d;
@@ -532,14 +634,19 @@ function playAITurn() {
 }
 
 // ── R6 : abandon (toujours simple × cubeValue) ───────────────────────────────
+// Couvre AUSSI le cas "quitter la partie pour aller dans le room" (cf.
+// modal type:'quit') qui appelle ce resign avec player = LOCAL_PLAYER.
+// Stats : la défaite est ajoutée au profil du quitter, la victoire au profil
+// de son adversaire (recordGameToProfile).
 function resign(player) {
-  if (!gameMode || gameWinner || modalState) return;
+  if (!gameMode || gameWinner) return;
   const winner = player === 'white' ? 2 : 1;
   gameWinner   = winner;
   gameWinType  = 'resign';
   const key    = winner === 1 ? 'white' : 'black';
   gameScore[key] += cubeValue;   // abandon = 1 × cubeValue, peu importe l'état du plateau
   cubePromised = null;
+  recordGameToProfile(key, 'resign');
 }
 
 // ── R7 : doubling cube actions ────────────────────────────────────────────────
@@ -632,6 +739,9 @@ function startGame(openingDelay) {
   modalState   = null;
   hasOwnedDice = { white: false, black: false };
   resetTimers();
+  // Mode LEARN : reset les drapeaux des tips pédagogiques pour une nouvelle partie
+  if (typeof resetLearnTips === 'function') resetLearnTips();
+  _learnFirstAITriggered = false;
   // aiMode est défini par la touche d'entrée ([5] = hot-seat, [i] = vs IA)
 
   // Mirror : non implémenté côté logique pour l'instant.

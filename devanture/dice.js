@@ -219,6 +219,16 @@ function drawDiceForPlayer(player) {
                      && (openingDisplay.white > 0 || openingDisplay.black > 0))
                  || (typeof openingTransition !== 'undefined' && openingTransition);
 
+  // PRÉ-OPENING : entre la fin du wave et le 1er _startOpeningRoll, personne
+  // n'a encore roulé (hasOwnedDice = {false, false}) MAIS mockState.turn vaut
+  // 'white' par défaut → le joueur courant aurait 2 carrés vides dessinés
+  // (puis disparaîtrait à l'apparition du 1er dé animé). Skip total pour
+  // les DEUX joueurs tant qu'aucun dé n'a été roulé.
+  const _preOpen = (typeof hasOwnedDice !== 'undefined' && hasOwnedDice
+                    && !hasOwnedDice.white && !hasOwnedDice.black
+                    && (typeof gameWinner === 'undefined' || !gameWinner));
+  if (_preOpen && !inOpening) return;
+
   for (let i = 0; i < 2; i++) {
     const pos    = getDiePos(player, i);
 
