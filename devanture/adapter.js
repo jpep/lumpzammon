@@ -616,7 +616,10 @@ function decideAIAccept() {
 }
 
 // ── Démarrer une vraie partie ─────────────────────────────────────────────────
-function startGame() {
+// startGame(openingDelay) : si openingDelay (ms) > 0, l'opening roll est
+// reporté de ce délai. Sert à laisser un peu de temps après l'apparition
+// progressive des fiches avant de lancer le 1er dé (1ère partie).
+function startGame(openingDelay) {
   gameState    = Logic.newGameState();
   gameMode     = true;
   _passCount   = 0;
@@ -648,9 +651,21 @@ function startGame() {
     },
     timers:  null,
   };
-  // Affiche les fiches dès le départ (avant la séquence d'opening roll qui dure ~6.6s)
+  // Affiche les fiches dès le départ (mais le fade-in visuel est piloté
+  // par checkerAppearT0 côté sketch.js)
   syncMockState();
 
+  // Si délai demandé, on reporte l'opening roll pour laisser le temps aux
+  // fiches d'apparaître + une petite pause avant le 1er lancer.
+  if (openingDelay && openingDelay > 0) {
+    setTimeout(_startOpeningRoll, openingDelay);
+  } else {
+    _startOpeningRoll();
+  }
+}
+
+function _startOpeningRoll() {
+  if (gameWinner) return;
   // ── Opening roll : chaque joueur lance un dé, à tour de rôle ──
   const rolls    = Logic.rollOpeningDice();
   const resolved = Logic.resolveOpening(rolls);

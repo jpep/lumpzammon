@@ -2,7 +2,7 @@
 <html lang="fr">
 <head>
   <meta charset="UTF-8">
-  <title>Lumpzammon – Skin Preview</title>
+  <title>GOMMAN – Skin Preview</title>
   <!-- Noto Sans : fallback pour les nicknames qui contiennent des caractères
        non disponibles dans nortechico (japonais, chinois, arabe, etc.). -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -14,6 +14,13 @@
     @font-face {
       font-family: 'nortechico';
       src: url('fonts/nortechico-100.otf') format('opentype');
+      font-display: block;
+    }
+    /* nortechico-60 : version "light" utilisée pour les notices in-game
+       (doublage promis, etc.) — chaîne CSS dédiée avec fallback Noto Sans. */
+    @font-face {
+      font-family: 'nortechico-60';
+      src: url('fonts/nortechico-60.otf') format('opentype');
       font-display: block;
     }
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -31,11 +38,11 @@
 </head>
 <body>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.4/p5.min.js"></script>
-  <script src="mockState.js?v=84"></script>
-  <script src="game/logic_standalone.js?v=84"></script>
-  <script src="game/ai_standalone.js?v=84"></script>
-  <script src="adapter.js?v=84"></script>
-  <script src="dice.js?v=84"></script>
-  <script src="sketch.js?v=84"></script>
+  <script src="mockState.js?v=150"></script>
+  <script src="game/logic_standalone.js?v=150"></script>
+  <script src="game/ai_standalone.js?v=150"></script>
+  <script src="adapter.js?v=150"></script>
+  <script src="dice.js?v=150"></script>
+  <script src="sketch.js?v=150"></script>
 </body>
 </html>
