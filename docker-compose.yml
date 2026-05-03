@@ -9,6 +9,7 @@ services:
     working_dir: /app
     volumes:
       - ./app:/app
+      - ./devanture:/app/public/devanture
       - node_modules:/app/node_modules
     ports:
       - "5173:5173"

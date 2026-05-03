@@ -250,6 +250,16 @@ A self-contained skin preview lives in `devanture/`. It runs without Vite/React 
 
 ### Run locally
 
+The dev container serves it via Vite alongside the React app:
+
+```
+http://localhost:5173/lumpzammon/devanture/
+```
+
+`docker-compose.yml` bind-mounts `./devanture` into `/app/public/devanture`, and a small middleware in `vite.config.js` rewrites the bare directory request to `index.html`.
+
+Standalone alternative (no Vite, with no-cache headers — useful when iterating without HMR noise):
+
 ```bash
 python serve.py 3132 devanture
 # Open http://localhost:3132
