@@ -1,0 +1,912 @@
+// adapter.js – pont entre Logic (état jpep) et mockState (état de rendu)
+// ─────────────────────────────────────────────────────────────────────────────
+// Mapping index :  jpep index i  ↔  notre pt i+1  (pt 1-24)
+//                  P1 (jpep) = white (skin, valeur positive)
+//                  P2 (jpep) = black (skin, valeur négative)
+// ─────────────────────────────────────────────────────────────────────────────
+
+let gameState   = null;   // état réel (Logic)
+let gameMode    = false;  // false = scénario mock, true = jeu réel
+let aiMode      = false;  // true = l'IA joue black (P2)
+let gameWinner  = 0;      // 0 = en cours, 1 = blanc, 2 = noir
+let gameWinType = '';     // 'simple' | 'gammon' | 'backgammon' | 'resign'
+let gameScore   = { white: 0, black: 0 };  // points cumulés sur la session
+
+// Opening roll visualisé : { white: vDice1, black: vDice2, winner: 1|2 } pendant la phase d'intro
+let openingResult = null;
+// Dés statiques affichés pendant l'opening (pour garder visibles ceux qui ne roulent pas)
+let openingDisplay = { white: 0, black: 0 };
+// Transition fade entre opening et démarrage du jeu : { winner, loser, winnerValue, loserValue, t0, dur }
+let openingTransition = null;
+// Vrai pendant toute la séquence d'opening (de Phase A jusqu'à fin Phase D')
+let openingActive = false;
+// Vrai dès qu'un joueur a possédé les dés au moins une fois (= a joué un tour)
+// Tant que false, ses carrés ne sont pas dessinés (même pas en transparence)
+let hasOwnedDice = { white: false, black: false };
+
+// R7 doubling cube
+// Variante du jeu : chaque joueur peut doubler UNE seule fois par partie.
+// La valeur cubeValue est partagée (1 → 2 → 4) ; cubeUsed mémorise qui a déjà
+// utilisé son double. Les deux indicateurs affichent la même valeur, mais
+// celui qui a déjà doublé passe à 50 % d'opacité.
+let cubeValue    = 1;     // 1, 2 ou 4
+let cubePromised = null;  // 'white'|'black' = qui a promis d'offrir au prochain tour, ou null
+let cubeOwner    = null;  // null (aucun, début de partie) | 'white' | 'black' = qui possède le cube
+let cubeUsed     = { white: false, black: false };  // qui a consommé son double
+let modalState   = null;  // null | { type:'offer'|'accept', player }
+
+// Timers (jeu réel) : move = 15s par coup, game = 119s total par joueur
+let timerState = {
+  white:    { game: 119 },
+  black:    { game: 119 },
+  moveLeft: 15,
+  active:   'move',   // 'move' | 'game'
+};
+let _timerInterval = null;
+
+// ── Profils joueurs (mock) ───────────────────────────────────────────────────
+// Données affichées dans l'overlay profil (clic sur un nom de joueur).
+// Le rang est dérivé du nombre total de parties via rankFromGames().
+const PLAYER_PROFILES = {
+  white: {
+    winPercent: 0.62,
+    totalGames: 234,
+    firstPlay:  '2024-03-15',
+    // Adversaires variés : un panel réaliste (pas la même personne tout le temps)
+    recentGames: [
+      // < 24h → tableau affichera HH:MM
+      { youScore: 4, oppScore: 2, opponent: 'NIA',     delta:  +2, playedAt: '2026-04-28T14:23:00' },
+      { youScore: 1, oppScore: 2, opponent: 'KAI',     delta:  -1, playedAt: '2026-04-28T10:15:00' },
+      { youScore: 8, oppScore: 4, opponent: 'OMAR',    delta:  +4, playedAt: '2026-04-27T22:30:00' },
+      // > 24h → AA/MM/JJ
+      { youScore: 3, oppScore: 5, opponent: 'LUNA',    delta:  -2, playedAt: '2026-04-25T18:00:00' },
+      { youScore: 5, oppScore: 4, opponent: 'ROCCO',   delta:  +1, playedAt: '2026-04-22T09:45:00' },
+      { youScore: 2, oppScore: 3, opponent: 'PRIYA',   delta:  -1, playedAt: '2026-04-18T16:12:00' },
+      { youScore: 7, oppScore: 4, opponent: 'KENJI',   delta:  +3, playedAt: '2026-04-12T20:40:00' },
+      { youScore: 0, oppScore: 1, opponent: 'MIRA',    delta:  -1, playedAt: '2026-04-05T11:30:00' },
+      { youScore: 6, oppScore: 5, opponent: 'TOMAS',   delta:  +1, playedAt: '2026-03-28T19:00:00' },
+      { youScore: 2, oppScore: 4, opponent: 'AKIRA',   delta:  -2, playedAt: '2026-03-19T13:25:00' },
+      { youScore: 9, oppScore: 5, opponent: 'NEFFA',   delta:  +4, playedAt: '2026-03-08T17:50:00' },
+      { youScore: 1, oppScore: 3, opponent: 'OREN',    delta:  -2, playedAt: '2026-02-25T08:15:00' },
+      { youScore: 5, oppScore: 5, opponent: 'CIRO',    delta:  +1, playedAt: '2026-02-12T22:00:00' },
+      { youScore: 3, oppScore: 4, opponent: 'YUNA',    delta:  -1, playedAt: '2026-01-30T14:40:00' },
+      { youScore: 8, oppScore: 4, opponent: 'BRUNO',   delta:  +4, playedAt: '2026-01-15T16:00:00' },
+      { youScore: 4, oppScore: 6, opponent: 'IRINA',   delta:  -2, playedAt: '2025-12-29T20:30:00' },
+      { youScore: 7, oppScore: 5, opponent: 'DARIO',   delta:  +2, playedAt: '2025-12-10T11:55:00' },
+    ],
+    // Historique du score (Y) en fonction du temps (X = date ISO).
+    // X0 = firstPlay, X_max = aujourd'hui ; Y_max = 1000 (réf affichage).
+    scoreHistory: [
+      { date: '2024-03-15', score:   0 },
+      { date: '2024-04-20', score:  40 },
+      { date: '2024-05-30', score:  80 },
+      { date: '2024-07-10', score: 150 },
+      { date: '2024-08-22', score: 130 },
+      { date: '2024-10-05', score: 230 },
+      { date: '2024-11-18', score: 290 },
+      { date: '2025-01-04', score: 340 },
+      { date: '2025-02-19', score: 320 },
+      { date: '2025-04-12', score: 410 },
+      { date: '2025-06-25', score: 470 },
+      { date: '2025-09-08', score: 530 },
+      { date: '2025-12-15', score: 510 },
+      { date: '2026-02-28', score: 590 },
+      { date: '2026-04-26', score: 620 },
+    ],
+  },
+  black: {
+    winPercent: 0.71,
+    totalGames: 1456,
+    firstPlay:  '2022-11-08',
+    recentGames: [
+      { youScore: 8, oppScore: 4, opponent: 'AKEMI',   delta:  +4, playedAt: '2026-04-28T13:50:00' },
+      { youScore: 5, oppScore: 3, opponent: 'JAVIER',  delta:  +2, playedAt: '2026-04-27T23:10:00' },
+      { youScore: 1, oppScore: 4, opponent: 'AURELIE', delta:  -3, playedAt: '2026-04-26T15:30:00' },
+      { youScore: 6, oppScore: 4, opponent: 'TARO',    delta:  +2, playedAt: '2026-04-23T19:20:00' },
+      { youScore: 2, oppScore: 3, opponent: 'INDRA',   delta:  -1, playedAt: '2026-04-19T10:00:00' },
+      { youScore: 4, oppScore: 3, opponent: 'YANA',    delta:  +1, playedAt: '2026-04-14T16:45:00' },
+      { youScore: 7, oppScore: 5, opponent: 'NORA',    delta:  +2, playedAt: '2026-04-08T22:15:00' },
+      { youScore: 3, oppScore: 4, opponent: 'KENJI',   delta:  -1, playedAt: '2026-04-02T18:00:00' },
+      { youScore: 5, oppScore: 6, opponent: 'IGOR',    delta:  -1, playedAt: '2026-03-25T11:30:00' },
+      { youScore: 8, oppScore: 4, opponent: 'SOFIA',   delta:  +4, playedAt: '2026-03-18T20:50:00' },
+      { youScore: 2, oppScore: 5, opponent: 'GAEL',    delta:  -3, playedAt: '2026-03-09T14:20:00' },
+      { youScore: 6, oppScore: 5, opponent: 'AMRITA',  delta:  +1, playedAt: '2026-02-28T17:10:00' },
+      { youScore: 4, oppScore: 7, opponent: 'BORIS',   delta:  -3, playedAt: '2026-02-15T09:35:00' },
+      { youScore: 9, oppScore: 5, opponent: 'YAEL',    delta:  +4, playedAt: '2026-02-03T21:00:00' },
+      { youScore: 1, oppScore: 3, opponent: 'EMRE',    delta:  -2, playedAt: '2026-01-22T13:40:00' },
+      { youScore: 7, oppScore: 5, opponent: 'PEDRO',   delta:  +2, playedAt: '2026-01-08T15:15:00' },
+    ],
+    scoreHistory: [
+      { date: '2022-11-08', score:   0 },
+      { date: '2023-01-22', score:  90 },
+      { date: '2023-04-15', score: 170 },
+      { date: '2023-07-03', score: 250 },
+      { date: '2023-09-21', score: 380 },
+      { date: '2023-12-12', score: 460 },
+      { date: '2024-03-04', score: 530 },
+      { date: '2024-06-18', score: 610 },
+      { date: '2024-09-25', score: 720 },
+      { date: '2024-12-30', score: 690 },
+      { date: '2025-03-22', score: 800 },
+      { date: '2025-06-14', score: 850 },
+      { date: '2025-09-08', score: 880 },
+      { date: '2025-12-20', score: 920 },
+      { date: '2026-04-26', score: 960 },
+    ],
+  },
+};
+
+// Score multijoueur (superscript in-game + parenthèses dans le profil) :
+// somme des deltas des dernières parties — par cohérence avec le tableau affiché.
+// Sur intégration jpep : remplacer par le vrai score cumulé Firebase.
+function getMultiplayerScore(player) {
+  if (typeof PLAYER_PROFILES === 'undefined') return 0;
+  const p = PLAYER_PROFILES[player];
+  if (!p || !p.recentGames) return 0;
+  return p.recentGames.reduce((s, g) => s + (g.delta || 0), 0);
+}
+
+// Rangs ASCII-friendly (7 paliers) — affichés avec '#' devant.
+//   0-50      = ROOKIE
+//   51-150    = NOVICE
+//   151-400   = AMATEUR
+//   401-1000  = SKILLED
+//   1001-2500 = ADVANCED
+//   2501-5000 = EXPERT
+//   5001+     = MASTER
+function rankFromGames(n) {
+  if (n <= 50)   return 'ROOKIE';
+  if (n <= 150)  return 'NOVICE';
+  if (n <= 400)  return 'AMATEUR';
+  if (n <= 1000) return 'SKILLED';
+  if (n <= 2500) return 'ADVANCED';
+  if (n <= 5000) return 'EXPERT';
+  return 'MASTER';
+}
+
+// ── Sync : met mockState à jour depuis gameState ──────────────────────────────
+function syncMockState() {
+  if (!gameState) return;
+  const gs = gameState;
+  const pl  = gs.turn;
+
+  for (let i = 0; i < 24; i++) {
+    const { n, p } = gs.pts[i];
+    mockState.points[i + 1] = n === 0 ? 0 : (p === 1 ? n : -n);
+  }
+  mockState.points[0] = 0;
+
+  mockState.bar.white = gs.bar[1];
+  mockState.bar.black = gs.bar[2];
+  mockState.off.white = gs.off[1];
+  mockState.off.black = gs.off[2];
+
+  mockState.turn  = pl === 1 ? 'white' : 'black';
+  mockState.dice  = [...new Set(gs.moves)];
+  mockState.phase = (pl > 0 && Logic.allHome(gs, pl)) ? 'bearingOff' : 'normal';
+}
+
+// ── Type de victoire : simple (1) | gammon (2) | backgammon (3) ──────────────
+function classifyWin(state, winner) {
+  const loser = winner === 1 ? 2 : 1;
+  if (state.off[loser] > 0) return 'simple';
+  // Perdant n'a sorti aucune fiche → au moins gammon
+  // Backgammon si perdant a une fiche sur la barre OU dans le home du gagnant
+  if (state.bar[loser] > 0) return 'backgammon';
+  const [lo, hi] = winner === 1 ? [0, 5] : [18, 23];
+  for (let i = lo; i <= hi; i++) {
+    if (state.pts[i].p === loser && state.pts[i].n > 0) return 'backgammon';
+  }
+  return 'gammon';
+}
+
+function winPoints(type) {
+  return type === 'backgammon' ? 3 : type === 'gammon' ? 2 : 1;
+}
+
+// ── Enregistrement des statistiques en fin de partie ─────────────────────────
+// Appelé pour TOUS les types de fin (normale, resign, quit-to-room) afin que
+// chaque partie incrémente totalGames et soit ajoutée en tête de recentGames
+// pour les deux joueurs.
+//   winnerColor : 'white' | 'black'
+//   winType     : 'simple' | 'gammon' | 'backgammon' | 'resign'
+function recordGameToProfile(winnerColor, winType) {
+  if (typeof PLAYER_PROFILES === 'undefined') return;
+  const loserColor = winnerColor === 'white' ? 'black' : 'white';
+  const points = (winType === 'resign' ? 1 : winPoints(winType)) * cubeValue;
+  const playedAt = new Date().toISOString();
+  const winnerOpp = (mockState.players && mockState.players[loserColor])  || loserColor.toUpperCase();
+  const loserOpp  = (mockState.players && mockState.players[winnerColor]) || winnerColor.toUpperCase();
+  if (PLAYER_PROFILES[winnerColor]) {
+    const p = PLAYER_PROFILES[winnerColor];
+    p.totalGames  = (p.totalGames || 0) + 1;
+    p.recentGames = p.recentGames || [];
+    p.recentGames.unshift({
+      youScore: gameScore[winnerColor],
+      oppScore: gameScore[loserColor],
+      opponent: winnerOpp,
+      delta:   +points,
+      playedAt,
+    });
+  }
+  if (PLAYER_PROFILES[loserColor]) {
+    const p = PLAYER_PROFILES[loserColor];
+    p.totalGames  = (p.totalGames || 0) + 1;
+    p.recentGames = p.recentGames || [];
+    p.recentGames.unshift({
+      youScore: gameScore[loserColor],
+      oppScore: gameScore[winnerColor],
+      opponent: loserOpp,
+      delta:   -points,
+      playedAt,
+    });
+  }
+}
+
+// ── Finaliser une étape de mouvement ─────────────────────────────────────────
+function finalizeMoveStep() {
+  // Mode LEARN : marque que white a joué un coup, ce qui arrête la boucle
+  // de la vague de contraste (sens 24 → 1) sur ses triangles.
+  if (typeof gameState !== 'undefined' && gameState && gameState.turn === 1
+      && typeof learnWhiteHasMoved !== 'undefined') {
+    learnWhiteHasMoved = true;
+  }
+  const winner = Logic.checkWin(gameState);
+  if (winner) {
+    gameWinner  = winner;
+    gameWinType = classifyWin(gameState, winner);
+    const key   = winner === 1 ? 'white' : 'black';
+    gameScore[key] += winPoints(gameWinType) * cubeValue;
+    recordGameToProfile(key, gameWinType);
+    syncMockState();
+    return;   // partie terminée, ne pas enchaîner
+  }
+  if (gameState.moves.length === 0) {
+    setTimeout(endTurn, 400);
+  } else {
+    // Des dés restent mais peut-être aucun coup jouable (barre bloquée, etc.)
+    const vm = Logic.getValidMoves(gameState, gameState.turn);
+    if (vm.length === 0) setTimeout(endTurn, 400);
+  }
+  syncMockState();
+}
+
+// ── Recherche récursive d'une séquence depuis fromIdx vers toIdx ─────────────
+// Explore jusqu'à `depth` dés combinés (1 à 4 selon ce qui reste à jouer).
+function findMoveSequence(state, pl, fromIdx, toIdx, depth) {
+  if (depth <= 0 || state.moves.length === 0) return null;
+  const moves = Logic.getValidMoves(state, pl);
+  for (const m of moves.filter(mv => mv.f === fromIdx)) {
+    if (m.t === toIdx) {
+      return { seq: [m], state: Logic.applyMove(state, pl, m) };
+    }
+  }
+  for (const m of moves.filter(mv => mv.f === fromIdx && mv.t !== 'off')) {
+    const ns  = Logic.applyMove(state, pl, m);
+    const sub = findMoveSequence(ns, pl, m.t, toIdx, depth - 1);
+    if (sub) return { seq: [m, ...sub.seq], state: sub.state };
+  }
+  return null;
+}
+
+// ── Appliquer un mouvement réel (1 à 4 dés combinés) ─────────────────────────
+// fromPt : 1-24 ou 'bar'   toPt : 1-24 ou 0 (bearing off)
+function applyRealMove(fromPt, toPt) {
+  if (!gameState) return false;
+  const pl      = gameState.turn;
+  const fromIdx = fromPt === 'bar' ? 'bar' : fromPt - 1;
+  const toIdx   = toPt   === 0    ? 'off' : toPt - 1;
+
+  const found = findMoveSequence(gameState, pl, fromIdx, toIdx, gameState.moves.length);
+  if (!found) return false;
+  gameState = found.state;
+  finalizeMoveStep();
+  return true;
+}
+
+// ── Multi-pickup (doubles) : applique N séquences de k dés chacune ───────────
+// k = floor(dés_restants / N) — autorise multi-sauts par fiche (ex: double 1-1 + 2 fiches = k=2)
+function applyMultipleMoves(fromPt, toPt, count) {
+  if (!gameState || count < 1) return 0;
+  const pl      = gameState.turn;
+  const fromIdx = fromPt === 'bar' ? 'bar' : fromPt - 1;
+  const toIdx   = toPt   === 0    ? 'off' : toPt - 1;
+  const k = Math.max(1, Math.floor(gameState.moves.length / count));
+  let applied = 0;
+  for (let i = 0; i < count; i++) {
+    const found = findMoveSequence(gameState, pl, fromIdx, toIdx, k);
+    if (!found) break;
+    gameState = found.state;
+    applied++;
+  }
+  if (applied > 0) finalizeMoveStep();
+  return applied;
+}
+
+// ── Destinations valides (1 à 4 dés combinés) ────────────────────────────────
+function collectTargets(state, pl, fromIdx, depth, targets) {
+  if (depth <= 0 || state.moves.length === 0) return;
+  const moves = Logic.getValidMoves(state, pl);
+  for (const m of moves.filter(mv => mv.f === fromIdx)) {
+    const dest = m.t === 'off' ? 0 : m.t + 1;
+    if (!targets.includes(dest)) targets.push(dest);
+    if (m.t !== 'off') {
+      const ns = Logic.applyMove(state, pl, m);
+      collectTargets(ns, pl, m.t, depth - 1, targets);
+    }
+  }
+}
+
+function getRealTargets(fromPt) {
+  if (!gameState) return [];
+  const pl      = gameState.turn;
+  const fromIdx = fromPt === 'bar' ? 'bar' : fromPt - 1;
+  const targets = [];
+  // Multi-pickup : k dés par fiche autorisés (k = floor(dés_restants / N))
+  const isMulti = (typeof drag !== 'undefined') && drag.active && (drag.numPieces || 1) > 1;
+  const N       = isMulti ? drag.numPieces : 1;
+  const depth   = isMulti
+    ? Math.max(1, Math.floor(gameState.moves.length / N))
+    : gameState.moves.length;
+  collectTargets(gameState, pl, fromIdx, depth, targets);
+  return targets;
+}
+
+// ── Fin de tour → dés adversaire + détection pass ────────────────────────────
+let _passCount = 0;   // sécurité anti-boucle infinie
+let noMovesNotice = { active: false, owner: null };
+
+// ── Timers ───────────────────────────────────────────────────────────────────
+function resetTimers() {
+  timerState = {
+    white:    { game: 119 },
+    black:    { game: 119 },
+    moveLeft: 15,
+    active:   'move',
+  };
+  stopTurnTimer();
+}
+
+function startTurnTimer() {
+  if (!gameMode || gameWinner) return;
+  // Mode LEARN : pas de timer, le joueur prend tout son temps pour apprendre.
+  if (typeof isLearnMode === 'function' && isLearnMode()) return;
+  timerState.moveLeft = 15;
+  timerState.active   = 'move';
+  if (!_timerInterval) _timerInterval = setInterval(tickTimer, 1000);
+}
+
+function stopTurnTimer() {
+  if (_timerInterval) { clearInterval(_timerInterval); _timerInterval = null; }
+}
+
+function tickTimer() {
+  if (!gameMode || gameWinner) { stopTurnTimer(); return; }
+  if (modalState) return;   // pause pendant un modal
+  if (noMovesNotice && noMovesNotice.active) return;   // pause pendant fade pass
+  // Pause tant que les dés ne sont pas posés (entre-tours, animation roll/settle)
+  if (typeof diceAnim !== 'undefined' && diceAnim.state !== DS.DONE) return;
+  const turn = mockState.turn;
+  if (timerState.active === 'move') {
+    timerState.moveLeft--;
+    if (timerState.moveLeft <= 0) {
+      timerState.moveLeft = 0;
+      timerState.active   = 'game';
+    }
+  } else {
+    timerState[turn].game--;
+    if (timerState[turn].game <= 0) {
+      timerState[turn].game = 0;
+      stopTurnTimer();
+      // Forfait : adversaire gagne (simple × cubeValue)
+      const winner = turn === 'white' ? 2 : 1;
+      gameWinner   = winner;
+      gameWinType  = 'simple';
+      gameScore[winner === 1 ? 'white' : 'black'] += cubeValue;
+      cubePromised = null;
+    }
+  }
+}
+
+function endTurn() {
+  if (!gameState || gameWinner) return;
+  const nextPl = gameState.turn === 1 ? 2 : 1;
+  gameState.turn  = nextPl;
+  noMovesNotice   = { active: false, owner: null };
+  syncMockState();
+
+  const turnColor = nextPl === 1 ? 'white' : 'black';
+  // R7 : si le joueur courant avait promis un double → modal AVANT lancer
+  if (cubePromised === turnColor && cubeValue < 4) {
+    modalState = { type: 'offer', player: turnColor };
+    startTurnTimer();   // démarre le timer même en attente de décision
+    return;
+  }
+  rollAndStart(nextPl);
+}
+
+// Détecte si le joueur a des pièces sur la barre ET que les 6 points d'entrée
+// sont tous bloqués (2+ fiches adverses) → aucun jet ne peut servir.
+function isBarThrowImpossible(pl) {
+  if (!gameState || !gameState.bar) return false;
+  if (gameState.bar[pl] === 0) return false;
+  const opp = pl === 1 ? 2 : 1;
+  for (let die = 1; die <= 6; die++) {
+    const idx = pl === 1 ? 24 - die : die - 1;   // jpep 0-indexé
+    const e = gameState.pts[idx];
+    const blocked = e.p === opp && e.n >= 2;
+    if (!blocked) return false;
+  }
+  return true;
+}
+
+function rollAndStart(nextPl) {
+  const turnColor = nextPl === 1 ? 'white' : 'black';
+
+  // Court-circuit : barre + toutes entrées bloquées → pas de jet, juste les
+  // cadres vides en surbrillance, puis on passe.
+  if (isBarThrowImpossible(nextPl)) {
+    gameState.dice  = [];
+    gameState.moves = [];
+    syncMockState();
+    clearDice();                 // diceAnim → EMPTY (cadres vides en surbrillance)
+    hasOwnedDice[turnColor] = true;
+    startTurnTimer();
+    _passCount++;
+    noMovesNotice = { active: true, owner: turnColor };
+    // En LEARN : pause prolongée pour laisser le temps de lire le tip "no moves"
+    const learnNoMovesDur = (typeof isLearnMode === 'function' && isLearnMode()) ? 3500 : 1500;
+    setTimeout(() => {
+      noMovesNotice = { active: false, owner: null };
+      endTurn();
+    }, learnNoMovesDur);
+    return;
+  }
+
+  const newDice   = Logic.rollDice();
+  gameState.dice  = newDice;
+  gameState.moves = [...newDice];
+  syncMockState();
+  clearDice();
+  startRoll(newDice, turnColor);
+  hasOwnedDice[turnColor] = true;
+  startTurnTimer();
+
+  // Si aucun coup disponible → laisser le user voir le lancer, puis transparence, puis pass
+  const vm = Logic.getValidMoves(gameState, nextPl);
+  if (vm.length === 0 && _passCount < 2) {
+    _passCount++;
+    const ownerName = nextPl === 1 ? 'white' : 'black';
+    // Délais prolongés en LEARN pour laisser le temps de lire le tip "no moves"
+    const inLearn = (typeof isLearnMode === 'function' && isLearnMode());
+    const readDur = inLearn ? 1800 : 800;
+    const passDur = inLearn ? 2500 : 900;
+    // Phase 1 : attendre que l'animation des dés soit posée
+    const waitDone = () => {
+      if (typeof diceAnim !== 'undefined' && diceAnim.state !== 'done') {
+        setTimeout(waitDone, 80);
+        return;
+      }
+      // Phase 2 : pause pour que le joueur lise les valeurs (dés à 100%)
+      setTimeout(() => {
+        // Phase 3 : transparence "comme joués" (50%, sans pips)
+        noMovesNotice = { active: true, owner: ownerName };
+        // Phase 4 : pause + disparition + pass
+        setTimeout(() => {
+          noMovesNotice = { active: false, owner: null };
+          endTurn();
+        }, passDur);
+      }, readDur);
+    };
+    waitDone();
+  } else {
+    _passCount = 0;
+    // Si IA active et c'est le tour de black (P2), attendre la fin des dés puis jouer
+    if (aiMode && nextPl === 2) {
+      waitForDiceThenAITurn();
+    }
+  }
+}
+
+// Poll l'état de l'animation des dés ; quand DONE, déclenche playAITurn.
+// En LEARN : on attend ÉGALEMENT que tout tip pédagogique en cours soit
+// dismissé par le joueur, et on rallonge le délai final pour laisser le
+// temps de comprendre la situation avant que l'IA enchaîne.
+// Pour le PREMIER tour de l'IA en LEARN, on déclenche EN PLUS deux boucles
+// de la vague de contraste dans le sens INVERSE (1 → 24) AVANT que l'IA
+// ne joue, pour montrer au débutant que les sens d'avancement sont opposés.
+let _learnFirstAITriggered = false;
+function waitForDiceThenAITurn() {
+  if (!gameMode || gameWinner) return;
+  // Note : on N'ATTEND PLUS la fermeture des tips LEARN — les tips
+  // s'auto-dismiss après LEARN_TIP_DUR ; l'IA enchaîne sans bloquer
+  // l'utilisateur (qui peut agir dès la fin du message).
+  if (typeof diceAnim !== 'undefined' && diceAnim.state !== 'done') {
+    setTimeout(waitForDiceThenAITurn, 80);
+    return;
+  }
+  // Premier tour AI en LEARN : déclenche 2 boucles de vague INVERSE
+  // (sens 1 → 24, opposé à white) + un tip explicatif, puis joue l'IA.
+  if (!_learnFirstAITriggered
+      && typeof isLearnMode === 'function' && isLearnMode()
+      && typeof learnTipsShown !== 'undefined' && learnTipsShown
+      && !learnTipsShown.blackDirection) {
+    _learnFirstAITriggered = true;
+    learnTipsShown.blackDirection = true;
+    if (typeof startLearnDirectionAnim === 'function') {
+      startLearnDirectionAnim('black', 2);     // 2 boucles dans le sens 1 → 24
+    }
+    if (typeof showLearnTip === 'function') {
+      showLearnTip("OPPONENT MOVES 1 → 24.");  // sens INVERSE de white
+    }
+    // Total = 2 boucles + 1 pause entre les deux
+    const loopDur = (typeof LEARN_DIRECTION_DUR !== 'undefined') ? LEARN_DIRECTION_DUR : 2400;
+    const pauseDur = (typeof LEARN_DIRECTION_PAUSE !== 'undefined') ? LEARN_DIRECTION_PAUSE : 1200;
+    const totalDur = loopDur * 2 + pauseDur;
+    setTimeout(playAITurn, totalDur + 200);
+    return;
+  }
+  const learnDelay = (typeof isLearnMode === 'function' && isLearnMode()) ? 1800 : 350;
+  setTimeout(playAITurn, learnDelay);
+}
+
+// ── Tour de l'IA (joue black, P2) — moves animés un par un, fusionnés par pièce ─
+function playAITurn() {
+  if (!gameMode || !aiMode || gameWinner) return;
+  // Note : pas de gating sur les tips LEARN ici — ils s'auto-dismiss et
+  // l'IA peut enchaîner immédiatement après son action.
+  if (mockState.turn !== 'black') return;
+  if (modalState) return;
+  const result = AI.aiPlay(gameState, 2);
+  if (!result.seq || result.seq.length === 0) {
+    finalizeMoveStep();
+    return;
+  }
+  // Fusion : si la pièce passe par plusieurs cases (A→B→C), un seul fade A→C
+  const groups = [];
+  for (let k = 0; k < result.seq.length; k++) {
+    const m = result.seq[k];
+    if (groups.length > 0) {
+      const prev = groups[groups.length - 1];
+      const lastM = prev.moves[prev.moves.length - 1];
+      // Suite de la même pièce ? (la dest du précédent = origine du courant)
+      if (lastM.t !== 'off' && m.f === lastM.t) {
+        prev.moves.push(m);
+        prev.to = m.t;
+        continue;
+      }
+    }
+    groups.push({ from: m.f, to: m.t, moves: [m] });
+  }
+
+  let i = 0;
+  function applyNext() {
+    if (gameWinner) return;
+    if (i >= groups.length) {
+      finalizeMoveStep();
+      return;
+    }
+    const g = groups[i];
+    const fromPt = g.from === 'bar' ? 'bar' : g.from + 1;
+    const toPt   = g.to   === 'off' ? 0    : g.to   + 1;
+    // Détection hit : pièce blanche seule (= blot) à n'importe quelle
+    // destination du groupe — y compris les points INTERMÉDIAIRES d'un
+    // mouvement combiné. Sinon les hits sur intermédiaires (ex. : black
+    // joue 5+3, hit à l'étape +5) étaient ratés et l'animation ne se
+    // déclenchait pas. On simule l'application séquentielle des sous-moves
+    // pour vérifier l'état au moment de chaque étape, puis on garde le
+    // premier hit rencontré (le plus proche du départ visuellement).
+    let hit = null;
+    let simState = gameState;
+    for (const m of g.moves) {
+      if (m.t !== 'off' && simState.pts[m.t]
+          && simState.pts[m.t].p === 1 && simState.pts[m.t].n === 1) {
+        hit = { pt: m.t + 1, isWhite: true };
+        break;
+      }
+      // Simule l'application pour le check du sous-move suivant.
+      try { simState = Logic.applyMove(simState, 2, m); }
+      catch (e) { break; }
+    }
+    // Première valeur de dé du groupe (utilisée pour synchroniser le fade du dé)
+    const firstDiceValue = g.moves[0].d;
+    // Points intermédiaires (toutes les destinations sauf la finale)
+    const intermediates = [];
+    for (let mi = 0; mi < g.moves.length - 1; mi++) {
+      const im = g.moves[mi];
+      intermediates.push(im.t === 'off' ? 0 : im.t + 1);
+    }
+    if (typeof startFlyingChecker === 'function') {
+      startFlyingChecker(fromPt, toPt, false, () => {
+        for (const m of g.moves) gameState = Logic.applyMove(gameState, 2, m);
+        syncMockState();
+        i++;
+        setTimeout(applyNext, 600);
+      }, hit, firstDiceValue, intermediates);
+    } else {
+      for (const m of g.moves) gameState = Logic.applyMove(gameState, 2, m);
+      syncMockState();
+      i++;
+      setTimeout(applyNext, 800);
+    }
+  }
+  applyNext();
+}
+
+// ── R6 : abandon (toujours simple × cubeValue) ───────────────────────────────
+// Couvre AUSSI le cas "quitter la partie pour aller dans le room" (cf.
+// modal type:'quit') qui appelle ce resign avec player = LOCAL_PLAYER.
+// Stats : la défaite est ajoutée au profil du quitter, la victoire au profil
+// de son adversaire (recordGameToProfile).
+function resign(player) {
+  if (!gameMode || gameWinner) return;
+  const winner = player === 'white' ? 2 : 1;
+  gameWinner   = winner;
+  gameWinType  = 'resign';
+  const key    = winner === 1 ? 'white' : 'black';
+  gameScore[key] += cubeValue;   // abandon = 1 × cubeValue, peu importe l'état du plateau
+  cubePromised = null;
+  recordGameToProfile(key, 'resign');
+}
+
+// ── R7 : doubling cube actions ────────────────────────────────────────────────
+// Cliquable à n'importe quel moment ; effet déclenché au début du prochain tour du joueur.
+function clickCube(player) {
+  if (!gameMode || gameWinner || modalState) return;
+  if (cubeValue >= 4) return;
+  // Variante : chaque joueur ne peut doubler qu'une seule fois.
+  if (cubeUsed[player]) return;
+  // Si l'adversaire a déjà promis → bloqué
+  if (cubePromised && cubePromised !== player) return;
+  cubePromised = player;
+  // Reset du timer du notice "YOU WILL BE ABLE TO DOUBLE…" :
+  // chaque clic (initial OU rappel) relance l'affichage à pleine opacité
+  // pour bien rappeler au joueur qu'il faut attendre son tour.
+  if (typeof doublePromiseT0 !== 'undefined') {
+    doublePromiseT0 = (typeof millis === 'function') ? millis() : Date.now();
+  }
+}
+
+function modalOfferResponse(accept) {
+  if (!modalState || modalState.type !== 'offer') return;
+  const offerer = modalState.player;
+  if (accept) {
+    const opponent = offerer === 'white' ? 'black' : 'white';
+    modalState = { type: 'accept', player: opponent, offerer };
+    // Si l'opposant est l'IA → décision auto sans modal visible côté user
+    if (aiMode && opponent === 'black') {
+      setTimeout(decideAIAccept, 600);   // court délai pour la fluidité
+    }
+  } else {
+    cubePromised = null;
+    modalState   = null;
+    rollAndStart(offerer === 'white' ? 1 : 2);
+  }
+}
+
+function modalAcceptResponse(accept) {
+  if (!modalState || modalState.type !== 'accept') return;
+  const offerer  = modalState.offerer;
+  const opponent = modalState.player;
+  if (accept) {
+    cubeValue    = Math.min(cubeValue * 2, 4);
+    cubeOwner    = opponent;       // l'accepteur possède désormais le cube
+    cubeUsed[offerer] = true;       // l'offrant a consommé son double (variante 1×/joueur)
+    cubePromised = null;
+    modalState   = null;
+    rollAndStart(offerer === 'white' ? 1 : 2);
+  } else {
+    // Refus → offrant gagne cubeValue (avant le doublement) en simple
+    gameWinner   = offerer === 'white' ? 1 : 2;
+    gameWinType  = 'simple';
+    gameScore[offerer] += cubeValue;
+    modalState   = null;
+    cubePromised = null;
+  }
+}
+
+// ── IA : décision auto d'accepter ou refuser un double offert ────────────────
+// Heuristique : on accepte si on n'est pas en (gros) désavantage évalué.
+function decideAIAccept() {
+  if (!modalState || modalState.type !== 'accept') return;
+  if (modalState.player !== 'black') return;
+  if (!aiMode || gameWinner) return;
+  let accept = true;
+  if (typeof AI !== 'undefined' && AI.evaluate) {
+    const myScore  = AI.evaluate(gameState, 2);
+    const oppScore = AI.evaluate(gameState, 1);
+    const advantage = myScore - oppScore;
+    // Accepte si pas en désavantage marqué (seuil empirique)
+    accept = advantage > -25;
+  }
+  modalAcceptResponse(accept);
+}
+
+// ── Démarrer une vraie partie ─────────────────────────────────────────────────
+// startGame(openingDelay) : si openingDelay (ms) > 0, l'opening roll est
+// reporté de ce délai. Sert à laisser un peu de temps après l'apparition
+// progressive des fiches avant de lancer le 1er dé (1ère partie).
+function startGame(openingDelay) {
+  gameState    = Logic.newGameState();
+  gameMode     = true;
+  _passCount   = 0;
+  gameWinner   = 0;
+  gameWinType  = '';
+  cubeValue    = 1;
+  cubePromised = null;
+  cubeOwner    = null;
+  cubeUsed     = { white: false, black: false };
+  modalState   = null;
+  hasOwnedDice = { white: false, black: false };
+  resetTimers();
+  // Mode LEARN : reset les drapeaux des tips pédagogiques pour une nouvelle partie
+  if (typeof resetLearnTips === 'function') resetLearnTips();
+  _learnFirstAITriggered = false;
+  // aiMode est défini par la touche d'entrée ([5] = hot-seat, [i] = vs IA)
+
+  // Mirror : non implémenté côté logique pour l'instant.
+  // L'inversion correcte (white reste en bas, plateau visuellement tourné)
+  // nécessite getBoardIndices(dir) du repo principal — sera branché à l'intégration.
+
+  mockState = {
+    points:  new Array(25).fill(0),
+    bar:     { white: 0, black: 0 },
+    off:     { white: 0, black: 0 },
+    turn:    'white',
+    dice:    [],
+    phase:   'normal',
+    players: {
+      white: (typeof userNick !== 'undefined' && userNick) ? userNick : 'WHITE',
+      black: aiMode ? 'COMPUTER' : 'OPPONENT',
+    },
+    timers:  null,
+  };
+  // Affiche les fiches dès le départ (mais le fade-in visuel est piloté
+  // par checkerAppearT0 côté sketch.js)
+  syncMockState();
+
+  // Si délai demandé, on reporte l'opening roll pour laisser le temps aux
+  // fiches d'apparaître + une petite pause avant le 1er lancer.
+  if (openingDelay && openingDelay > 0) {
+    setTimeout(_startOpeningRoll, openingDelay);
+  } else {
+    _startOpeningRoll();
+  }
+}
+
+function _startOpeningRoll() {
+  if (gameWinner) return;
+  // ── Opening roll : chaque joueur lance un dé, à tour de rôle ──
+  const rolls    = Logic.rollOpeningDice();
+  const resolved = Logic.resolveOpening(rolls);
+  openingDisplay = { white: 0, black: 0 };
+  openingActive  = true;
+
+  // Phase A : white roule un dé (le 2e dé reste vide)
+  clearDice();
+  startRoll([rolls[1]], 'white');
+  setTimeout(() => {
+    if (gameWinner) return;
+    openingDisplay.white = rolls[1];           // garde le dé 1 visible côté white
+    // Phase B : black roule à son tour
+    clearDice();
+    startRoll([rolls[2]], 'black');
+    setTimeout(() => {
+      if (gameWinner) return;
+      openingDisplay.black = rolls[2];         // garde le dé 1 visible côté black
+      clearDice();                             // arrête l'animation, on passe en statique
+      // Phase C : pause pour lire les deux dés (sans message texte)
+      setTimeout(() => {
+        if (gameWinner) return;
+        // Phase D' : transition fade rapide — loser disparaît, winner.dé2 apparaît
+        const winnerColor = resolved.turn === 1 ? 'white' : 'black';
+        const loserColor  = resolved.turn === 1 ? 'black' : 'white';
+        openingTransition = {
+          winner:      winnerColor,
+          loser:       loserColor,
+          winnerValue: resolved.turn === 1 ? rolls[1] : rolls[2],
+          loserValue:  resolved.turn === 1 ? rolls[2] : rolls[1],
+          t0:          (typeof millis === 'function') ? millis() : performance.now(),
+          dur:         400,
+        };
+        setTimeout(() => {
+          openingTransition = null;
+          openingDisplay    = { white: 0, black: 0 };
+          openingActive     = false;
+          if (gameWinner) return;
+          Object.assign(gameState, resolved);
+          // Ordonne dice/moves comme la transition : [winnerValue, loserValue]
+          // pour éviter le "pivot" visuel des dés à la fin du transfer.
+          const wV = openingTransition ? null :
+                     (resolved.turn === 1 ? rolls[1] : rolls[2]);
+          const lV = resolved.turn === 1 ? rolls[2] : rolls[1];
+          const ordered = [
+            resolved.turn === 1 ? rolls[1] : rolls[2],
+            lV
+          ];
+          gameState.dice  = ordered.slice();
+          gameState.moves = ordered.slice();
+          syncMockState();
+          clearDice();
+          // Pas de re-lancer : les dés sont posés directement dans l'ordre du transfer
+          const winnerColor2 = resolved.turn === 1 ? 'white' : 'black';
+          setDiceFinal(ordered, winnerColor2);
+          hasOwnedDice[winnerColor2] = true;
+          startTurnTimer();
+          if (aiMode && resolved.turn === 2) waitForDiceThenAITurn();
+        }, 400);
+      }, 1100);
+    }, 2200);
+  }, 2200);
+}
+
+// ── Relancer les dés manuellement ────────────────────────────────────────────
+function rollRealDice() {
+  if (!gameState) return;
+  if (gameState.moves.length === 0 && gameState.phase === 'move') endTurn();
+}
+
+// ── Scénario de test [6] : entrée depuis la barre, un dé bloqué ──────────────
+// Blanc sur la barre, dés [3, 4]
+// Pt 22 (idx 21) libre  → entrée avec dé 3 possible
+// Pt 21 (idx 20) bloqué par 2 noires → entrée avec dé 4 impossible
+// Attendu : après l'entrée avec le 3, le dé 4 passe automatiquement
+function startBarEntryTest() {
+  gameState    = Logic.newGameState();
+  gameMode     = true;
+  _passCount   = 0;
+  gameWinner   = 0;
+  gameWinType  = '';
+  cubeValue    = 1;
+  cubePromised = null;
+  cubeOwner    = null;
+  cubeUsed     = { white: false, black: false };
+  modalState   = null;
+  resetTimers();
+
+  // Vider le plateau
+  for (let i = 0; i < 24; i++) gameState.pts[i] = { n: 0, p: 0 };
+  gameState.bar = { 1: 0, 2: 0 };
+  gameState.off = { 1: 0, 2: 0 };
+
+  // Scénario : barre NOIRE TOTALEMENT BLOQUÉE — c'est le tour de l'IA, donc
+  // on voit DIRECTEMENT le comportement "pas de jet, cadres vides en
+  // surbrillance, pass au tour suivant" déclenché par l'opposant.
+  // Black entre depuis la barre sur les points 1-6 (jpep idx 0-5).
+  // Pour tout bloquer : 2+ blanches sur CHACUN des 6 points (12 fiches).
+  for (let i = 0; i <= 5; i++) gameState.pts[i] = { n: 2, p: 1 };  // 12 blanches sur pts 1-6
+  // 3 blanches restantes (5+3+12 = ne marche pas, ajustons)
+  gameState.pts[7]  = { n: 3, p: 1 };  // pt  8 : 3 blanches → total 12+3 = 15 ✓
+  // Quelques noires pour contextualiser (black n'a pas perdu)
+  gameState.pts[18] = { n: 5, p: 2 };  // pt 19 : 5 noires (home black)
+  gameState.pts[16] = { n: 4, p: 2 };  // pt 17 : 4 noires
+  gameState.pts[12] = { n: 5, p: 2 };  // pt 13 : 5 noires (= 14 + 1 barre)
+  // 14 + 1 = 15 noires ✓
+
+  gameState.bar[2] = 1;   // 1 fiche noire sur la barre
+  gameState.turn   = 2;   // tour de l'opposant (black)
+  gameState.dice   = [];
+  gameState.moves  = [];
+  aiMode = true;          // active mode IA pour que black soit l'IA
+
+  mockState = {
+    points:  new Array(25).fill(0),
+    bar:     { white: 0, black: 0 },
+    off:     { white: 0, black: 0 },
+    turn:    'white',
+    dice:    [],
+    phase:   'normal',
+    players: {
+      white: (typeof userNick !== 'undefined' && userNick) ? userNick : 'WHITE',
+      black: aiMode ? 'COMPUTER' : 'OPPONENT',
+    },
+    timers:  null,
+  };
+
+  syncMockState();
+  clearDice();
+  // Lance via le flow normal : rollAndStart pour BLACK (l'opposant). Le check
+  // isBarThrowImpossible va déclencher : pas de jet, cadres vides en surbrillance,
+  // puis pass automatique vers white.
+  rollAndStart(2);
+}

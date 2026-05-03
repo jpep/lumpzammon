@@ -134,7 +134,7 @@ export default function GameScreen({
 
   // Persist local/AI game state across page reloads
   useEffect(() => {
-    if (!isOnline) saveLocalGame(mode, localState, localDirection);
+    if (!isOnline && localState.phase !== 'pass') saveLocalGame(mode, localState, localDirection);
   }, [isOnline, mode, localState, localDirection]);
 
   // Animation state
@@ -295,18 +295,25 @@ export default function GameScreen({
 
     const vm = getValidMoves(newGs, newGs.turn);
     if (vm.length === 0) {
-      newGs.phase = 'roll';
-      newGs.turn = newGs.turn === P1 ? P2 : P1;
-      newGs.dice = [];
-      newGs.moves = [];
+      // Show the dice and pass overlay before transitioning.
+      // Use phase='pass' so neither AI turn nor AI auto-roll effects fire.
+      newGs.phase = 'pass';
       setSelectedDie(null);
       setPassOverlay(currentPlayer);
+      updateState(newGs);
+      setTimeout(() => {
+        const passGs = clone(newGs);
+        passGs.phase = 'roll';
+        passGs.turn = passGs.turn === P1 ? P2 : P1;
+        passGs.dice = [];
+        passGs.moves = [];
+        updateState(passGs);
+      }, 1500);
       setTimeout(() => setPassOverlay(null), 2000);
     } else {
       setSelectedDie(dice[0]);
+      updateState(newGs);
     }
-
-    updateState(newGs);
   }, [gs, currentPlayer, myTurn, isOnline, updateState]);
 
   // AI turn — apply one move at a time with animation
@@ -317,14 +324,17 @@ export default function GameScreen({
     const timer = setTimeout(() => {
       const { seq } = aiPlay(gs, P2);
       if (seq.length === 0) {
-        const newGs = clone(gs);
-        newGs.phase = 'roll';
-        newGs.turn = P1;
-        newGs.dice = [];
-        newGs.moves = [];
+        // Show dice for a moment before passing
         setPassOverlay(P2);
+        setTimeout(() => {
+          const newGs = clone(gs);
+          newGs.phase = 'roll';
+          newGs.turn = P1;
+          newGs.dice = [];
+          newGs.moves = [];
+          updateState(newGs);
+        }, 1500);
         setTimeout(() => setPassOverlay(null), 2000);
-        updateState(newGs);
         return;
       }
 
@@ -440,7 +450,7 @@ export default function GameScreen({
     setAnimatingFrom(null);
     setAnimatingPlayer(null);
     isAnimatingRef.current = false;
-    setLocalDirection(d => d === 0 ? 1 : 0);
+    if (!isAI) setLocalDirection(d => d === 0 ? 1 : 0);
   };
 
   const playerName = (p) => {
@@ -529,9 +539,9 @@ export default function GameScreen({
         />
       </div>
 
-      {message && (
-        <div style={{ color: theme.textHighlight, fontSize: 14, marginBottom: 8 }}>{message}</div>
-      )}
+      <div style={{ color: theme.textHighlight, fontSize: 14, marginBottom: 8, minHeight: 20, visibility: message ? 'visible' : 'hidden' }}>
+        {message || '\u00A0'}
+      </div>
 
       {/* Board — scales to fit viewport */}
       <div style={{
@@ -604,8 +614,8 @@ export default function GameScreen({
         </div>
       )}
 
-      {/* Dice + controls */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginTop: 16, flexWrap: 'wrap', justifyContent: 'center' }}>
+      {/* Dice + controls — fixed height to prevent board from shifting */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginTop: 16, flexWrap: 'wrap', justifyContent: 'center', minHeight: 52 }}>
         {gs.phase === 'opening' && (
           <>
             {gs.openingRolls[P1] > 0 && (

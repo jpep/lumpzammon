@@ -77,6 +77,8 @@ export default function Point({
         {checkers}
         {overflow > 0 && (
           <div style={{
+            position: 'absolute',
+            [isTop ? 'top' : 'bottom']: maxShow * 38 + 4,
             color: theme.text,
             fontSize: 11,
             fontWeight: 'bold',
