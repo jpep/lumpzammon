@@ -473,12 +473,20 @@ let signinChoiceBtns = [];      // boutons cliquables SIGN IN / GUEST
 
 // Liste mockée de joueurs dans le room (à brancher sur le multijoueur jpep).
 // score = score global multijoueur (signed) — affiché en superscript après le nom.
+// COMPUTER#N : adversaires IA listés comme des joueurs ordinaires dans la
+// lobby online — cliquer sur leur nom = inviter et démarrer une partie en
+// mode aiMode=true (cf. handler dans mousePressed, branche roomBtns). On
+// simplifie ainsi le menu d'accueil (plus de bouton VS COMPUTER séparé) :
+// l'utilisateur passe par ONLINE → choisit un humain ou un COMPUTER#N.
 const ROOM_PLAYERS = [
-  { name: 'ALICE',   online: true,  busy: false, score:  +12 },
-  { name: 'BOB',     online: true,  busy: true,  score:   -4 },
-  { name: 'CHARLIE', online: true,  busy: false, score:  +28 },
-  { name: 'DIANA',   online: true,  busy: false, score:   +3 },
-  { name: 'EVE',     online: false, busy: false, score:  -15 },
+  { name: 'ALICE',      online: true,  busy: false, score:  +12 },
+  { name: 'COMPUTER#1', online: true,  busy: false, score:    0, isAI: true },
+  { name: 'BOB',        online: true,  busy: true,  score:   -4 },
+  { name: 'COMPUTER#2', online: true,  busy: false, score:    0, isAI: true },
+  { name: 'CHARLIE',    online: true,  busy: false, score:  +28 },
+  { name: 'COMPUTER#3', online: true,  busy: false, score:    0, isAI: true },
+  { name: 'DIANA',      online: true,  busy: false, score:   +3 },
+  { name: 'EVE',        online: false, busy: false, score:  -15 },
 ];
 
 let fontLarge, fontSmall, fontMed;
@@ -1287,10 +1295,14 @@ function drawMenuOptions(alpha) {
   menuBtns = [];
   // disabled:true → bouton grisé, pas de hover, pas de clic — pour les modes
   // pas encore implémentés. Cliquer dessus n'a aucun effet.
+  // Le mode "vs Computer" historique a été retiré du menu : on joue
+  // désormais contre l'IA en passant par ONLINE puis en sélectionnant un
+  // adversaire COMPUTER#N dans la lobby (cf. ROOM_PLAYERS). Cela simplifie
+  // l'écran d'entrée à 3 actions : ONLINE, LEARN, SIGN OUT.
   const buttons = [
-    { id: 'ai',     label: 'VS  COMPUTER',   disabled: false },
-    { id: 'online', label: 'ONLINE',         disabled: false },
-    { id: 'learn',  label: 'LEARN',          disabled: false },   // mode pédagogique vs IA
+    { id: 'online',  label: 'ONLINE',   disabled: false },
+    { id: 'learn',   label: 'LEARN',    disabled: false },   // mode pédagogique vs IA
+    { id: 'signout', label: 'SIGN OUT', disabled: false },
   ];
   const cxC = bx + 13 * a / 2;
   const btnSize = r * 1.425 * MSG_SCALE;  // 1.5× agrandi (r*0.95 → r*1.425)
@@ -3431,17 +3443,25 @@ function mousePressed() {
     for (const btn of menuBtns) {
       if (mouseX >= btn.x && mouseX <= btn.x + btn.w
           && mouseY >= btn.y && mouseY <= btn.y + btn.h) {
+        // SIGN OUT : reset nick + transition fade-noir vers l'écran sign-in.
+        // Réutilise la même mécanique que le sign-out depuis l'overlay profil
+        // (cf. handler dans la branche 'profileOverlay' plus bas).
+        if (btn.id === 'signout') {
+          try { localStorage.removeItem(NICK_STORAGE_KEY); } catch (e) {}
+          userNick = null;
+          signoutTransitionT0 = millis();
+          return;
+        }
         gameModeSelected = btn.id;
         if (btn.id === 'online') {
           appState = 'room';   // lobby existant
         } else {
           appState = 'game';
-          // 'ai' = partie classique contre l'ordinateur.
-          // 'learn' = mode pédagogique (placeholder : pour l'instant aussi
-          // contre l'ordinateur, prévoir d'ajouter hints / AI ralentie /
+          // 'learn' = mode pédagogique (vs IA avec hints + AI ralentie +
           // suggestions de coups). gameModeSelected garde 'learn' pour
           // permettre aux features pédagogiques de se brancher dessus.
-          aiMode  = (btn.id === 'ai' || btn.id === 'learn');
+          // 'ai' classique a été déplacé vers la lobby online (COMPUTER#N).
+          aiMode  = (btn.id === 'learn');
           // Démarre le fade-out de la fenêtre menu ET le wave EN PARALLÈLE :
           // le plateau (barre → triangles → fiches) se révèle DESSOUS le voile
           // qui s'estompe, donnant l'impression que les informations
@@ -3537,6 +3557,12 @@ function mousePressed() {
         setTimeout(() => {
           if (appState === 'waiting' && inviteTarget === btn.player) {
             appState = 'game';
+            // COMPUTER#N : adversaire IA — bascule en aiMode pour que
+            // l'opposant soit géré par adapter.js (waitForDiceThenAITurn,
+            // playAITurn, etc.). Pour les humains (online classique) on
+            // reste en !aiMode.
+            aiMode = !!btn.player.isAI;
+            gameModeSelected = aiMode ? 'ai' : 'online';
             // Reset score session pour une vraie nouvelle partie
             if (typeof gameScore !== 'undefined') {
               gameScore.white = 0; gameScore.black = 0;
