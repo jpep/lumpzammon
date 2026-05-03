@@ -108,6 +108,7 @@ The current AI is a single-step greedy evaluator. It works but is beatable.
 
 - [x] **GitHub repo setup** - Initialize git, push to GitHub (`jpep/lumpzammon`)
 - [x] **GitHub Pages deploy** - Live at https://jpep.github.io/lumpzammon/
+- [x] **Devanture skin on Pages** - Deploy step copies `devanture/` into `app/dist/`; live at https://jpep.github.io/lumpzammon/devanture/
 - [ ] **Custom domain** - Optional: configure CNAME for a custom domain
 - [ ] **Firebase env separation** - Separate Firebase projects for dev vs prod
 - [ ] **CI checks** - Add lint + test steps to the GitHub Actions workflow
