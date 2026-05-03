@@ -8,7 +8,20 @@ function git(cmd) {
 }
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [
+    react(),
+    {
+      name: 'devanture-index',
+      configureServer(server) {
+        server.middlewares.use((req, _res, next) => {
+          if (req.url === '/lumpzammon/devanture' || req.url === '/lumpzammon/devanture/') {
+            req.url = '/lumpzammon/devanture/index.html';
+          }
+          next();
+        });
+      },
+    },
+  ],
   base: '/lumpzammon/',
   define: {
     __BUILD_COMMIT__: JSON.stringify(git('rev-parse --short HEAD')),
