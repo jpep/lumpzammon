@@ -2,6 +2,14 @@
 <html lang="fr">
 <head>
   <meta charset="UTF-8">
+  <!-- viewport-fit=cover : sur iOS Safari, étend le viewport sous les barres
+       d'UI (notch / home indicator). user-scalable=no : empêche le pinch-zoom
+       qui cause des layout thrashings sur les inputs HTML overlays. Sans cette
+       balise, iOS Safari rendait la page en mode "desktop" (980px de large)
+       et zoomait pour rentrer — les inputs sign-in (NICKNAME, PASSWORD) se
+       retrouvaient hors écran ou inatteignables, et le voile noir du fond ne
+       couvrait pas toute la zone visible. -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
   <title>GOMMAN – Skin Preview</title>
   <!-- Noto Sans : fallback pour les nicknames qui contiennent des caractères
        non disponibles dans nortechico (japonais, chinois, arabe, etc.). -->
@@ -31,6 +39,12 @@
       font-display: block;
     }
     * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+    }
     body {
       /* Fond initial NOIR (image image-less) : empêche que fond.jpg ne flash
          AVANT que le canvas ne soit prêt à dessiner le voile sombre + GOMMAN
@@ -42,10 +56,12 @@
       background-position: center center;
       background-size: cover;
       background-repeat: no-repeat;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      min-height: 100vh;
+      /* iOS Safari : on évite le centrage flex + min-height:100vh qui causait
+         des bandes noires sup/inf (100vh inclut la barre URL Safari → body
+         déborde du viewport visible → canvas centré au milieu). En remplaçant
+         par html/body 100% + overflow hidden, le body fait toujours la taille
+         du viewport effectif, et le canvas (taille windowWidth/Height fixée
+         en JS via createCanvas) couvre tout. */
     }
     canvas { display: block; touch-action: none; }
     /* Masque l'écran "loading…" natif de p5.js */
