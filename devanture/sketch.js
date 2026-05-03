@@ -338,6 +338,7 @@ function checkLearnTips() {
 // Mode de jeu sélectionné depuis le menu d'accueil ('ai' | 'online' | 'learn')
 let gameModeSelected = null;
 let menuBtns = [];                    // boutons cliquables du menu d'accueil
+let gmmnTitleBtn = null;              // bbox du titre GMMN (cliquable depuis le menu pour ouvrir l'écran about)
 // Transition menu → game : fade-out de la fenêtre noire translucide pour
 // révéler le plateau, puis enchaîne sur le wave d'apparition.
 let menuFadeOutT0 = 0;
@@ -760,6 +761,7 @@ function draw() {
   if (appState === 'intro')   { drawIntro();   return; }
   if (appState === 'signin')  { drawSignin();  return; }
   if (appState === 'menu')    { drawMenu();    return; }
+  if (appState === 'about')   { drawAbout();   return; }
 
   // ── Transition menu → game : fade-out de la fenêtre noire translucide ──────
   // Le wave (barre + triangles + fiches) tourne EN PARALLÈLE du fade, dessous
@@ -1072,6 +1074,21 @@ function drawGommanHollow(titleAlpha) {
   ctx.fillStyle = `rgba(255,255,255,${0.35 * titleAlpha})`;
   drawSegments(letterFont, 255, 255, 255, Math.round(255 * 0.35 * titleAlpha));
   ctx.restore();
+
+  // Mémorise la bbox du titre pour la rendre cliquable depuis le menu
+  // (-> ouvre l'about screen via mousePressed). Le tiers inférieur étant
+  // clippé visuellement, la zone cliquable couvre la portion VISIBLE :
+  // de cyC - sz/2 (top des lettres) à clipBottom (= cyC + sz/6).
+  if (titleAlpha >= 0.9) {
+    gmmnTitleBtn = {
+      x: bx,
+      y: cyC - sz / 2,
+      w: 13 * a,
+      h: clipBottom - (cyC - sz / 2),
+    };
+  } else {
+    gmmnTitleBtn = null;
+  }
 }
 
 // ── Trace les deux côtés + bas du cadre depuis le point haut-centre ──────────
@@ -1288,6 +1305,46 @@ function drawMenu() {
   const elapsedMenu = menuT0 ? (millis() - menuT0) : INTRO_MENU_FADE;
   const menuP = Math.min(1, elapsedMenu / INTRO_MENU_FADE);
   drawMenuOptions(easeOutCubic(menuP));
+}
+
+// ── About screen : ouvert au clic sur le titre GMMN depuis le menu ───────────
+// Affiche le cadre + titre GMMN figés (cohérent avec menu/signin) + bloc texte
+// centré. N'importe quel clic ferme l'overlay → retour au menu.
+function drawAbout() {
+  drawMessageVeil(0.86);
+  drawIntroFrame(1.0);
+  drawGommanHollow(1.0);
+
+  noStroke();
+  fill(C.ivory);
+  textAlign(CENTER, CENTER);
+
+  const cxC = bx + 13 * a / 2;
+  const cyC = by + 13 * a * 0.50;
+  const lineH = r * 1.3 * MSG_SCALE;
+
+  // Lignes : titre, sous-titre, version, lien GitHub, hint pour fermer.
+  // Sans toucher au DOM : tout est rendu via p5.text dans la palette ivory.
+  const lines = [
+    { text: 'BACKGAMMON SKIN',          size: r * 1.15 * MSG_SCALE, alpha: 255 },
+    { text: 'PROTOTYPE  P5.JS',         size: r * 0.85 * MSG_SCALE, alpha: 180 },
+    { text: '',                          size: lineH * 0.4,          alpha:   0 },
+    { text: 'github.com/jpep/lumpzammon', size: r * 0.75 * MSG_SCALE, alpha: 200 },
+    { text: '',                          size: lineH * 0.6,          alpha:   0 },
+    { text: '[ TAP TO CLOSE ]',          size: r * 0.7 * MSG_SCALE,  alpha: 140 },
+  ];
+  // Hauteur totale du bloc pour le centrer verticalement
+  const visibleLines = lines.filter(l => l.text);
+  const totalH = visibleLines.length * lineH;
+  let y = cyC - totalH / 2 + lineH / 2;
+  if (fontLarge) textFont(fontLarge);
+  for (const l of lines) {
+    if (!l.text) { y += lineH * 0.5; continue; }
+    textSize(l.size);
+    fill(red(C.ivory), green(C.ivory), blue(C.ivory), l.alpha);
+    text(l.text, cxC, y);
+    y += lineH;
+  }
 }
 
 // ── Helper : dessine les boutons de sélection de mode avec alpha global ─────
@@ -3438,8 +3495,24 @@ function mousePressed() {
     // pas de return → le clic propage à la suite du handler
   }
 
+  // ── About : un tap n'importe où ferme l'overlay → retour au menu ──
+  if (appState === 'about') {
+    appState = 'menu';
+    return;
+  }
+
   // ── Menu : sélection du mode de jeu ──
   if (appState === 'menu') {
+    // Clic sur le titre GMMN → ouvre l'about screen.
+    // Le check du titre passe AVANT les boutons pour que la zone clic
+    // reste prioritaire si un bouton dépassait (ce qui n'est pas le cas
+    // ici, le titre étant au-dessus du cadre, mais c'est plus défensif).
+    if (gmmnTitleBtn
+        && mouseX >= gmmnTitleBtn.x && mouseX <= gmmnTitleBtn.x + gmmnTitleBtn.w
+        && mouseY >= gmmnTitleBtn.y && mouseY <= gmmnTitleBtn.y + gmmnTitleBtn.h) {
+      appState = 'about';
+      return;
+    }
     for (const btn of menuBtns) {
       if (mouseX >= btn.x && mouseX <= btn.x + btn.w
           && mouseY >= btn.y && mouseY <= btn.y + btn.h) {
