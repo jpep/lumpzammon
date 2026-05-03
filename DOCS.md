@@ -257,6 +257,10 @@ python serve.py 3132 devanture
 
 The launch config is in `.claude/launch.json` (gitignored) for the Claude Code preview.
 
+### Public URL
+
+Also deployed to GitHub Pages at https://jpep.github.io/lumpzammon/devanture/ — the deploy workflow copies `devanture/` into `app/dist/` after the Vite build so it sits alongside the React app under the same Pages site.
+
 ### File layout
 
 ```
