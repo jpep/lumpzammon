@@ -2105,6 +2105,8 @@ function drawRoom() {
 }
 
 // ── Modal d'attente d'acceptation d'invitation ───────────────────────────────
+// Mêmes tailles et écarts que drawModal (offer/resign/quit) pour cohérence :
+// titre = 1.1r, action = 1.0r, gap titre→action = 5.4r (titre à -2.4r, action à +3.0r).
 function drawWaiting() {
   noStroke(); fill(0, 0, 0, 200);
   rect(0, 0, windowWidth, windowHeight);
@@ -2114,11 +2116,12 @@ function drawWaiting() {
   fill(255); textAlign(CENTER, CENTER);
   if (fontLarge) textFont(fontLarge);
   textSize(r * 1.1 * MSG_SCALE);
-  text(`Waiting for ${inviteTarget ? inviteTarget.name : '...'}`, cx, cy - r * 1.4);
+  text(`Waiting for ${inviteTarget ? inviteTarget.name : '...'}`, cx, cy - r * 2.4);
 
-  textSize(r * 0.7 * MSG_SCALE);
-  text('CANCEL', cx, cy + r * 0.8);
-  modalBtns = { cancel: { cx, cy: cy + r * 0.8, hw: r * 1.6 * MSG_SCALE, hh: r * 0.9 * MSG_SCALE } };
+  textSize(r * 1.0 * MSG_SCALE);
+  const yA = cy + r * 3.0;
+  text('CANCEL', cx, yA);
+  modalBtns = { cancel: { cx, cy: yA, hw: r * 2.2 * MSG_SCALE, hh: r * 1.0 * MSG_SCALE } };
 }
 
 // ── Overlay profil joueur ─────────────────────────────────────────────────────
@@ -2488,8 +2491,9 @@ function drawModal() {
   const cy = windowHeight / 2;
   fill(255); textAlign(CENTER, CENTER);
 
-  // Espacement entre la question et les boutons YES/NO doublé (était 2.4r → 4.8r)
-  // Question centrée à cy - 2.4r, boutons à cy + 2.4r → écart total 4.8r symétrique
+  // Mise en page commune des modals : question à cy - 2.4r, action à cy + 3.0r
+  // → gap titre→action = 5.4r (un peu plus d'air qu'avant, demande UX).
+  // Tailles homogénéisées : titre = 1.1r, action texte = 1.0r, glyphes = 2.7r.
   if (modalState.type === 'offer') {
     if (fontLarge) textFont(fontLarge);
     textSize(r * 1.1 * MSG_SCALE);
@@ -2497,7 +2501,7 @@ function drawModal() {
 
     textSize(r * 1.0 * MSG_SCALE);
     const dx = r * 3;
-    const yY = cy + r * 2.4;
+    const yY = cy + r * 3.0;
     text('YES', cx - dx, yY);
     text('NO',  cx + dx, yY);
     modalBtns = {
@@ -2512,7 +2516,7 @@ function drawModal() {
 
     textSize(r * 1.0 * MSG_SCALE);
     const dx = r * 3;
-    const yY = cy + r * 2.4;
+    const yY = cy + r * 3.0;
     text('YES', cx - dx, yY);
     text('NO',  cx + dx, yY);
     modalBtns = {
@@ -2527,7 +2531,7 @@ function drawModal() {
 
     textSize(r * 1.0 * MSG_SCALE);
     const dx = r * 3;
-    const yY = cy + r * 2.4;
+    const yY = cy + r * 3.0;
     text('YES', cx - dx, yY);
     text('NO',  cx + dx, yY);
     modalBtns = {
@@ -2539,13 +2543,13 @@ function drawModal() {
     // En mode IA, l'IA décide seule → ne pas afficher le modal côté user
     if (aiMode && modalState.player === 'black') return;
     if (fontLarge) textFont(fontLarge);
-    textSize(r * 0.9 * MSG_SCALE);
-    text('Your opponent offers you a double', cx, cy - r * 2.2);
+    textSize(r * 1.1 * MSG_SCALE);
+    text('Your opponent offers you a double', cx, cy - r * 2.4);
 
     textFont('Arial');
     textSize(r * 2.7 * MSG_SCALE);
     const dx = r * 3;
-    const yY = cy + r * 0.8;
+    const yY = cy + r * 3.0;
     const acceptBtn  = { cx: cx - dx, cy: yY, hw: r * 1.8 * MSG_SCALE, hh: r * 1.8 * MSG_SCALE };
     const declineBtn = { cx: cx + dx, cy: yY, hw: r * 1.8 * MSG_SCALE, hh: r * 1.8 * MSG_SCALE };
     const hoverA = isClickInBtn(acceptBtn);
@@ -2596,10 +2600,11 @@ function drawGameOver() {
   // En MODE LEARN : pas de REVENGE? — clic n'importe où = retour au menu.
   // Ailleurs (online / autre) : indication discrète et clic-to-dismiss.
   if (aiMode && !isLearnMode()) {
-    textSize(r * 1.0 * MSG_SCALE);
+    textSize(r * 1.1 * MSG_SCALE);
     text('REVENGE?', cx, cy + r * 4.05);
-    // Boutons YES / NO sur la ligne suivante, espacés autour du centre
-    const btnY = cy + r * 6.6;
+    // Boutons YES / NO sur la ligne suivante, écart REVENGE→action augmenté
+    // (était 2.55r → 3.6r) pour cohérence avec les autres modals (gap ≥ 3r).
+    const btnY = cy + r * 7.65;
     const btnSz = r * 1.2 * MSG_SCALE;
     textSize(btnSz);
     const yesW = textWidth('YES');
