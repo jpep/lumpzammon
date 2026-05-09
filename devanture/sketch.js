@@ -1020,6 +1020,23 @@ function drawGommanHollow(titleAlpha) {
   const x0 = bx;
 
   ctx.save();
+  // ── Rotation 90° anti-horaire en PAYSAGE ────────────────────────────────
+  // En paysage, le titre est lu sur le côté GAUCHE du cadre, du bas vers le
+  // haut (G en bas, N en haut). Toute la géométrie ci-dessous (positions
+  // relatives à bx/by/cyC, clip, segments) reste calculée comme en portrait,
+  // et c'est la matrice de transform qui pivote l'ensemble autour du centre
+  // du cadre. La rotation -π/2 mappe :
+  //   axe X positif (sens des lettres) → axe Y négatif canvas (vers le haut)
+  //   axe Y positif (vers le bas du texte) → axe X positif canvas (vers la
+  //   droite, donc vers le cadre) → la portion clippée (bottom du texte)
+  //   se retrouve naturellement contre le cadre, comme attendu.
+  if (diceOnSide) {
+    const cxCadre = bx + 13 * a / 2;
+    const cyCadre = by + 13 * a / 2;
+    ctx.translate(cxCadre, cyCadre);
+    ctx.rotate(-Math.PI / 2);
+    ctx.translate(-cxCadre, -cyCadre);
+  }
   ctx.textAlign    = 'left';
   ctx.textBaseline = 'middle';
   // Clip du 1/3 inférieur du texte (calculé sur la taille NORMALE des
@@ -1080,12 +1097,24 @@ function drawGommanHollow(titleAlpha) {
   // clippé visuellement, la zone cliquable couvre la portion VISIBLE :
   // de cyC - sz/2 (top des lettres) à clipBottom (= cyC + sz/6).
   if (titleAlpha >= 0.9) {
-    gmmnTitleBtn = {
-      x: bx,
-      y: cyC - sz / 2,
-      w: 13 * a,
-      h: clipBottom - (cyC - sz / 2),
-    };
+    if (diceOnSide) {
+      // En paysage, le titre est pivoté 90° CCW autour du centre du cadre.
+      // La bbox du portrait (x ∈ [bx, bx+13a], y ∈ [cyC - sz/2, clipBottom])
+      // se transforme en (x ∈ [bx - r/2 - 2sz/3, bx - r/2], y ∈ [by, by+13a]).
+      gmmnTitleBtn = {
+        x: bx - r/2 - 2 * sz / 3,
+        y: by,
+        w: 2 * sz / 3,
+        h: 13 * a,
+      };
+    } else {
+      gmmnTitleBtn = {
+        x: bx,
+        y: cyC - sz / 2,
+        w: 13 * a,
+        h: clipBottom - (cyC - sz / 2),
+      };
+    }
   } else {
     gmmnTitleBtn = null;
   }
