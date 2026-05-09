@@ -3023,12 +3023,22 @@ function drawCheckers() {
   const skipWhiteBar = drag.active && drag.fromPt === 'bar' && mockState.turn === 'white';
   const skipBlackBar = drag.active && drag.fromPt === 'bar' && mockState.turn === 'black';
   const barIdx = drag.barIdx != null ? drag.barIdx : -1;
+  // Pendant l'animation flying : la pièce du sommet de la barre (qui s'envole)
+  // doit être SKIP du rendu statique, sinon elle reste visible en doublon
+  // (fantôme) tant que la pièce volante n'a pas atteint sa destination.
+  // mockState.bar.{white,black} n'est décrémenté qu'au onDone du flying.
+  const flyFromBarWhite = flyingChecker && flyingChecker.from === 'bar' && flyingChecker.isWhite;
+  const flyFromBarBlack = flyingChecker && flyingChecker.from === 'bar' && !flyingChecker.isWhite;
+  const flyTopWhite = flyFromBarWhite ? mockState.bar.white - 1 : -1;
+  const flyTopBlack = flyFromBarBlack ? mockState.bar.black - 1 : -1;
   for (let i = 0; i < mockState.bar.white; i++) {
     if (skipWhiteBar && i === barIdx) continue;
+    if (i === flyTopWhite) continue;
     drawChecker(barCX, barPieceCY(true, i), true, false, false, C.bar);
   }
   for (let i = 0; i < mockState.bar.black; i++) {
     if (skipBlackBar && i === barIdx) continue;
+    if (i === flyTopBlack) continue;
     drawChecker(barCX, barPieceCY(false, i), false, false, false, C.bar);
   }
 }
