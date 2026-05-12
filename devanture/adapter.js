@@ -357,6 +357,14 @@ let _passCount = 0;   // sécurité anti-boucle infinie
 let noMovesNotice = { active: false, owner: null };
 
 // ── Timers ───────────────────────────────────────────────────────────────────
+// Timer continu : décrémente le temps réel écoulé entre deux ticks
+// (Date.now()) plutôt que de compter les ticks de setInterval. Ainsi, même
+// si le navigateur throttle setInterval (page inactive, onglet en arrière-
+// plan, app mobile minimisée…), le décompte reflète le temps écoulé exact
+// quand le tick suivant arrive. Aucune pause hors mode LEARN — le timer
+// continue pendant les modals, l'animation des dés, etc.
+let _lastTickMs = 0;
+let _accumulatedMs = 0;   // reste de seconde qui n'a pas encore été décrémenté
 function resetTimers() {
   timerState = {
     white:    { game: 119 },
@@ -364,6 +372,8 @@ function resetTimers() {
     moveLeft: 15,
     active:   'move',
   };
+  _lastTickMs = 0;
+  _accumulatedMs = 0;
   stopTurnTimer();
 }
 
@@ -373,6 +383,8 @@ function startTurnTimer() {
   if (typeof isLearnMode === 'function' && isLearnMode()) return;
   timerState.moveLeft = 15;
   timerState.active   = 'move';
+  _lastTickMs    = Date.now();
+  _accumulatedMs = 0;
   if (!_timerInterval) _timerInterval = setInterval(tickTimer, 1000);
 }
 
@@ -382,29 +394,40 @@ function stopTurnTimer() {
 
 function tickTimer() {
   if (!gameMode || gameWinner) { stopTurnTimer(); return; }
-  if (modalState) return;   // pause pendant un modal
-  if (noMovesNotice && noMovesNotice.active) return;   // pause pendant fade pass
-  // Pause tant que les dés ne sont pas posés (entre-tours, animation roll/settle)
-  if (typeof diceAnim !== 'undefined' && diceAnim.state !== DS.DONE) return;
+  // Calcule le temps RÉEL écoulé depuis le dernier tick (immune au throttling
+  // de setInterval pour les onglets inactifs). On accumule les fractions de
+  // seconde dans _accumulatedMs et on décrémente d'autant de secondes entières
+  // que possible — le reste est conservé pour le tick suivant.
+  const now = Date.now();
+  if (_lastTickMs === 0) { _lastTickMs = now; return; }
+  _accumulatedMs += (now - _lastTickMs);
+  _lastTickMs = now;
+  let secsToConsume = Math.floor(_accumulatedMs / 1000);
+  if (secsToConsume <= 0) return;
+  _accumulatedMs -= secsToConsume * 1000;
   const turn = mockState.turn;
-  if (timerState.active === 'move') {
-    timerState.moveLeft--;
-    if (timerState.moveLeft <= 0) {
-      timerState.moveLeft = 0;
-      timerState.active   = 'game';
+  while (secsToConsume > 0 && !gameWinner) {
+    if (timerState.active === 'move') {
+      timerState.moveLeft--;
+      if (timerState.moveLeft <= 0) {
+        timerState.moveLeft = 0;
+        timerState.active   = 'game';
+      }
+    } else {
+      timerState[turn].game--;
+      if (timerState[turn].game <= 0) {
+        timerState[turn].game = 0;
+        stopTurnTimer();
+        // Forfait : adversaire gagne (simple × cubeValue)
+        const winner = turn === 'white' ? 2 : 1;
+        gameWinner   = winner;
+        gameWinType  = 'simple';
+        gameScore[winner === 1 ? 'white' : 'black'] += cubeValue;
+        cubePromised = null;
+        return;
+      }
     }
-  } else {
-    timerState[turn].game--;
-    if (timerState[turn].game <= 0) {
-      timerState[turn].game = 0;
-      stopTurnTimer();
-      // Forfait : adversaire gagne (simple × cubeValue)
-      const winner = turn === 'white' ? 2 : 1;
-      gameWinner   = winner;
-      gameWinType  = 'simple';
-      gameScore[winner === 1 ? 'white' : 'black'] += cubeValue;
-      cubePromised = null;
-    }
+    secsToConsume--;
   }
 }
 
@@ -633,20 +656,49 @@ function playAITurn() {
   applyNext();
 }
 
-// ── R6 : abandon (toujours simple × cubeValue) ───────────────────────────────
+// ── R6 : abandon — multiplicateur selon l'état du plateau du perdant ─────────
 // Couvre AUSSI le cas "quitter la partie pour aller dans le room" (cf.
 // modal type:'quit') qui appelle ce resign avec player = LOCAL_PLAYER.
-// Stats : la défaite est ajoutée au profil du quitter, la victoire au profil
-// de son adversaire (recordGameToProfile).
+// Règles officielles du backgammon appliquées au resign :
+//   - perdant a sorti ≥ 1 pièce        → simple (×1) — affiché "RESIGN"
+//   - perdant n'a sorti aucune pièce   → gammon (×2)
+//   - perdant a une pièce sur la barre
+//     ou dans le home du gagnant       → backgammon (×3)
+// Le label affiché reste "RESIGN" pour le cas simple ; pour gammon/backgammon,
+// le label naturel ("GAMMON" / "BACKGAMMON") est utilisé — c'est plus parlant
+// que "RESIGN ×2" et cohérent avec la victoire normale.
+// Stats : recordGameToProfile reçoit le type final → delta calculé en cohérence.
+// Détecte une position initiale (aucun mouvement n'a été joué). Sert à
+// déclasser un resign en début de partie : sinon classifyWin retournerait
+// 'backgammon' à cause des pièces white initialement sur le point 24 (= home
+// black) — ce qui pénaliserait injustement un joueur qui abandonne avant
+// même d'avoir bougé.
+function isInitialPosition(state) {
+  if (!state || !state.pts) return false;
+  if (state.off[1] !== 0 || state.off[2] !== 0) return false;
+  if (state.bar[1] !== 0 || state.bar[2] !== 0) return false;
+  const init = Logic.initialBoard();
+  for (let i = 0; i < 24; i++) {
+    if (state.pts[i].n !== init[i].n || state.pts[i].p !== init[i].p) return false;
+  }
+  return true;
+}
+
 function resign(player) {
   if (!gameMode || gameWinner) return;
-  const winner = player === 'white' ? 2 : 1;
+  const winner     = player === 'white' ? 2 : 1;
+  // Abandon AVANT tout mouvement = simple, peu importe la position de départ
+  // (qui serait artificiellement classée 'backgammon' à cause des fiches
+  // white initialement sur le point 24, dans le home black).
+  const classified = isInitialPosition(gameState)
+    ? 'simple'
+    : classifyWin(gameState, winner);   // 'simple' | 'gammon' | 'backgammon'
   gameWinner   = winner;
-  gameWinType  = 'resign';
+  gameWinType  = (classified === 'simple') ? 'resign' : classified;
   const key    = winner === 1 ? 'white' : 'black';
-  gameScore[key] += cubeValue;   // abandon = 1 × cubeValue, peu importe l'état du plateau
+  gameScore[key] += winPoints(classified) * cubeValue;
   cubePromised = null;
-  recordGameToProfile(key, 'resign');
+  recordGameToProfile(key, gameWinType);
 }
 
 // ── R7 : doubling cube actions ────────────────────────────────────────────────

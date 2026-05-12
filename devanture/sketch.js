@@ -3,10 +3,42 @@
 // Géométrie : r, a = 2r, plateau 13a × 13a
 // Raccourcis : [1][2][3][4] → scénarios
 // ─────────────────────────────────────────────────────────────────────────────
+// GLOSSAIRE BACKGAMMON — termes officiels ↔ identifiants utilisés dans le code
+// ─────────────────────────────────────────────────────────────────────────────
+//   Outfield  : points 7-12 (bas) et 13-18 (haut). Zones de transit "à l'air
+//               libre" hors quadrants maison. Pas de nom dédié dans le code,
+//               les points sont accessibles par mockState.points[pt].
+//   Home White: points 1-6 (en bas-droite du plateau). Quadrant maison du
+//               joueur WHITE → c'est ici qu'il bear-off ses pièces.
+//   Home Black: points 19-24 (en haut-droite). Quadrant maison du joueur
+//               BLACK. (Logic.allHome(state, pl) teste si toutes les pièces
+//               d'un joueur sont rentrées dans son home.)
+//   Bar       : la barre centrale verticale (entre points 6/7 et 18/19) où
+//               les pièces frappées vont. mockState.bar.{white,black} compte
+//               les pièces présentes. Convention drag : drag.fromPt = 'bar'.
+//   Tray      : zone de bearing-off (à droite du plateau en paysage ; sous
+//               le board en portrait). Le code utilise "off" pour ce concept
+//               (legacy) : mockState.off.{white,black} = nombre de pièces
+//               sorties ; pt === 0 dans drag.snapPt = drop dans la tray ;
+//               drawOff / drawOffPortrait / drawOffLandscape = rendu.
+//   Doubling cube : cube de doublage (souvent appelé "64" car affiche la
+//               valeur maximale 64). Code : cubeValue / cubeOwner / cubeUsed.
+//               Variants ici : cubeValue ∈ {1,2,4}, 1 double par joueur.
+//   Bearing off : phase finale du jeu (toutes pièces dans le home → on peut
+//               sortir vers la tray). mockState.phase = 'bearingOff'.
+//   Gammon    : victoire ×2 quand le perdant n'a sorti aucune pièce.
+//   Backgammon: victoire ×3 si en plus le perdant a une pièce sur la bar
+//               OU dans le home du gagnant. classifyWin() renvoie ce label.
+// ─────────────────────────────────────────────────────────────────────────────
 
 let r, a, bx, by;
 let diceOnSide = true;   // true = dés à gauche (paysage) ; false = dés au-dessus/dessous (portrait)
 const MARGIN    = 24;
+// Détection iOS (iPhone / iPad / iPod) — applique des compactages spécifiques
+// au portrait mobile : marges latérales réduites, top serré, drapeau agrandi.
+const IS_IOS = typeof navigator !== 'undefined'
+            && (/iPad|iPhone|iPod/.test(navigator.userAgent || '')
+                || (navigator.platform === 'MacIntel' && (navigator.maxTouchPoints || 0) > 1));
 const MAX_STACK = 6;
 
 // Zones cliquables mises à jour à chaque draw
@@ -19,6 +51,7 @@ let revengeBtns = { yes: null, no: null };
 let roomBtns  = [];      // [{ x, y, w, h, player }] — clic NOM = invite
 let roomScoreBtns = [];  // [{ x, y, w, h, player }] — clic SCORE = ouvre stats
 let roomLocalBtn  = null; // { x, y, w, h } — bloc LOCAL (nom + score) → ouvre stats LOCAL
+let roomSignoutBtn = null; // { x, y, w, h } — icône SIGN OUT à droite/dessous du cadre room
 let nameBtns   = { white: null, black: null };  // zones cliquables sur le nom (overlay profil)
 let nameBlockW = { white: 0, black: 0 };
 
@@ -30,6 +63,16 @@ let signoutBtn     = null;
 let recentGamesScroll = 0;
 // État de drag tactile pour le scroll du tableau
 let _scrollTouchY = null;
+// Accumulateur de mouvement |Δy| sur la durée du touch courant — utilisé pour
+// armer _didScroll dès que le total dépasse le seuil (4 px), même pour des
+// scrolls lents où chaque touchMoved bouge < seuil.
+let _scrollAccum = 0;
+// Vrai si le touch courant a vraiment scrollé (cumul > seuil) — utilisé dans
+// touchEnded pour décider si on doit fermer l'overlay (tap simple) ou non
+// (scroll). Sans ce flag, on ne peut pas distinguer un tap d'un scroll, car
+// `_scrollTouchY` est continuellement mis à jour dans touchMoved et se confond
+// avec mouseY au moment du touchEnded.
+let _didScroll = false;
 // Mode tactile dans l'overlay profil : 'scroll' | 'graph' | null
 let _touchMode    = null;
 // Vrai dès le 1er touch (pour distinguer un appareil tactile d'une souris)
@@ -59,6 +102,10 @@ let doublePromiseT0 = null;
 //                       | 'room' (lobby) | 'waiting'
 let appState   = 'intro';
 let inviteTarget = null;
+// État vers lequel revient l'écran 'about' à la fermeture (clic n'importe où) :
+// par défaut 'menu' (ouverture depuis le menu), mais peut être 'room' si l'about
+// a été ouvert depuis la lobby via clic sur le titre GMMN du cadre du room.
+let aboutReturnState = 'menu';
 
 // ── Intro animée (cadre + GOMMAN synchronisés en creux, puis menu en fade) ───
 let introT0 = 0;                      // millis() du début de la phase intro
@@ -342,6 +389,10 @@ let gmmnTitleBtn = null;              // bbox du titre GMMN (cliquable depuis le
 // Transition menu → game : fade-out de la fenêtre noire translucide pour
 // révéler le plateau, puis enchaîne sur le wave d'apparition.
 let menuFadeOutT0 = 0;
+// Transition waiting → game : fade-out du voile noir + GMMN pour révéler le
+// board en douceur quand l'opposant accepte l'invitation.
+let waitingFadeOutT0 = 0;
+const WAITING_FADE_OUT_DUR = 800;     // ms : durée du fade-out
 const MENU_FADE_OUT_DUR = 600;        // ms : durée du fade-out du voile menu
 
 // ── Transition fluide des tailles nom/info à chaque changement de tour ──────
@@ -467,9 +518,17 @@ function checkerFadeAlpha(pt, stackIdx) {
 // L'unicité (pour rattacher les stats) est supposée respectée par convention pour l'instant.
 const NICK_STORAGE_KEY = 'bg:nick';
 let userNick = null;            // nickname courant (string ou null si pas encore saisi)
-let signinInputEl = null;       // <input> HTML : nickname (full) ou guest name
-let signinPassEl  = null;       // <input> HTML : password (full uniquement)
-let signinMode    = 'choice';   // 'choice' | 'full' | 'guest'
+let signinInputEl  = null;      // <input> HTML : NAME ('login') / EMAIL ('full') / GUEST NAME ('guest')
+let signinEmailEl  = null;      // <input> HTML : EMAIL en mode 'login' uniquement
+let signinPassEl   = null;      // <input> HTML : PASSWORD ('full' et 'login')
+let signinVerifyEl = null;      // <input> HTML : VERIFY PASSWORD en mode 'login' uniquement
+let signinMode    = 'choice';   // 'choice' | 'full' | 'guest' | 'login'
+// Sous-menu PARTNERS déroulé sur l'écran 'choice' : affiche 3 sous-options
+// (Google / Meta / Other). Toggle au clic sur "SIGN IN VIA PARTNERS".
+let partnersExpanded = false;
+// Checkbox "Remember me" du formulaire sign-in (state local pour l'instant ;
+// à brancher sur localStorage / Firebase remember-me cookies plus tard).
+let rememberMe = false;
 let signinChoiceBtns = [];      // boutons cliquables SIGN IN / GUEST
 
 // Liste mockée de joueurs dans le room (à brancher sur le multijoueur jpep).
@@ -538,8 +597,12 @@ let currentFond = 'fond1.jpg';
 let mirrorMode  = false;   // bascule l'orientation des fiches d'une partie à l'autre
 
 function preload() {
-  // Choix aléatoire d'un fond pour la 1ʳᵉ partie
-  currentFond = FOND_LIST[Math.floor(Math.random() * FOND_LIST.length)];
+  // Choix aléatoire d'un fond pour la 1ʳᵉ partie — on combine Math.random()
+  // (entropy classique) avec Date.now() pour garantir que le seed change
+  // à chaque reload, même si le browser dépriorise Math.random() en début
+  // de session (cas observé : le 1er fond restait toujours fond1.jpg).
+  const _seed = (Math.random() * 1e6 + Date.now()) | 0;
+  currentFond = FOND_LIST[Math.abs(_seed) % FOND_LIST.length];
   bgImage     = loadImage(fondUrl(currentFond));
   fontLarge   = loadFont('fonts/nortechico-100.otf');
   fontSmall   = loadFont('fonts/nortechico-60.otf');
@@ -655,20 +718,29 @@ function computeGeometry() {
     bx = (windowWidth  - 13*a) / 2;
     by = (windowHeight - 13*a) / 2;
   } else {
-    // Dés au-dessus (noir) et en-dessous (blanc).
-    // Bloc texte = 2 lignes (szN + gap + szP = 3.5r) → même hauteur que les dés.
-    // Le tout (dé+gap+plateau+gap+dé) est centré verticalement dans la fenêtre.
-    const maxH = (windowHeight - 2 * MARGIN) * 26 / 39.5;
-    const maxW = windowWidth  - 2 * MARGIN;
-    const side = min(maxW, maxH);
-    a  = side / 13;
+    // PORTRAIT — board TOUJOURS centré verticalement (comme en horizontal).
+    // Contrainte sur `a` : la marge symétrique top/bot = (windowHeight-13a)/2
+    // doit être ≥ TOP_NEEDED_R·r pour accueillir SANS tronquer :
+    //   - score session (X) au-dessus du dé noir : score top = by - 8.35r
+    //     (cy = by - ds - 1.6r - 0.5r - ds/2 = by - 7.35r ; SZ_BIG = 2r)
+    //   - colonne droite (flag + cube) au coin sup-droit :
+    //     1r margin + 2.415r flagH iOS + 0.7r gap + 1.61r cube glyph = 5.725r
+    // Le score (X) est la contrainte binding (8.35r > 5.725r).
+    //   → TOP_NEEDED_R = 9 (8.35 + 0.65r safety pour ascender PIX)
+    //   → a ≤ windowHeight / 22
+    // Marges latérales unifiées à 8 px (iOS + Chrome F12) — sur écrans larges
+    // (Chrome F12 iPhone SE 375x667), la contrainte largeur devient binding,
+    // donnant des marges minimales de portraitMargin ; sur écrans courts (iOS
+    // Safari avec URL bar), la hauteur reste binding mais la marge latérale
+    // est divisée par ~1.6 par rapport au réglage précédent (TOP_NEEDED_R 11).
+    const portraitMargin = 8;
+    const maxW = windowWidth - 2 * portraitMargin;
+    const TOP_NEEDED_R = 9;
+    const VERTICAL_TOTAL_A = 13 + TOP_NEEDED_R;
+    a  = min(maxW / 13, windowHeight / VERTICAL_TOTAL_A);
     r  = a / 2;
-    bx = (windowWidth  - 13*a) / 2;
-    // Centrage vertical : block vertical = dé(3.5r) + gap(r*1.6) + plateau(13a) + gap(r*1.6) + dé(3.5r)
-    const block  = dieSize() + r * 1.6;          // 5.1r de chaque côté
-    const totalH = 2 * block + 13 * a;
-    const vide   = max(0, windowHeight - totalH);
-    by = vide / 2 + block;
+    bx = (windowWidth - 13*a) / 2;
+    by = (windowHeight - 13*a) / 2;   // board centré verticalement
   }
 }
 
@@ -758,10 +830,45 @@ function draw() {
   // + titres/boutons. Le plateau, les fiches, les dés et les fiches joueur
   // ne se dévoilent qu'après le clic sur un mode de jeu, par fade-out
   // de la fenêtre overlay (cf. menuFadeOutT0 plus bas).
-  if (appState === 'intro')   { drawIntro();   return; }
-  if (appState === 'signin')  { drawSignin();  return; }
-  if (appState === 'menu')    { drawMenu();    return; }
-  if (appState === 'about')   { drawAbout();   return; }
+  // Helper : dessine le voile noir de transition SIGN OUT par-dessus la
+  // scène courante et bascule vers 'signin' quand le voile est plein.
+  // Sans ça, la transition lancée depuis le menu (early-return ci-dessous)
+  // ou tout autre écran pré-partie n'était jamais rendue ni terminée.
+  function drawSignoutTransitionIfActive() {
+    if (signoutTransitionT0 <= 0) return;
+    const el = millis() - signoutTransitionT0;
+    const t  = Math.min(1, el / SIGNOUT_TRANSITION_DUR);
+    const veilA = smootherstep(t);
+    const ctx = drawingContext;
+    ctx.save();
+    ctx.fillStyle = `rgba(0,0,0,${veilA})`;
+    ctx.fillRect(0, 0, windowWidth, windowHeight);
+    ctx.restore();
+    if (t >= 1) {
+      signoutTransitionT0 = 0;
+      appState = 'signin';
+      signinMode = 'choice';
+      partnersExpanded = false;
+      menuT0 = millis();
+    }
+  }
+
+  if (appState === 'intro')   { drawIntro();  drawSignoutTransitionIfActive(); return; }
+  if (appState === 'signin')  { drawSignin(); drawSignoutTransitionIfActive(); return; }
+  if (appState === 'menu')    { drawMenu();   drawSignoutTransitionIfActive(); return; }
+  if (appState === 'about')   {
+    // Cache TOUS les inputs HTML (jusqu'à 4 en mode 'login') si on a ouvert
+    // l'about depuis le sign-in : sinon les <input> overlay restent visibles
+    // par-dessus le voile sombre de l'about. Ils seront restaurés par
+    // drawSigninOptions au retour.
+    if (signinInputEl)  signinInputEl.style.display  = 'none';
+    if (signinEmailEl)  signinEmailEl.style.display  = 'none';
+    if (signinPassEl)   signinPassEl.style.display   = 'none';
+    if (signinVerifyEl) signinVerifyEl.style.display = 'none';
+    drawAbout();
+    drawSignoutTransitionIfActive();
+    return;
+  }
 
   // ── Transition menu → game : fade-out de la fenêtre noire translucide ──────
   // Le wave (barre + triangles + fiches) tourne EN PARALLÈLE du fade, dessous
@@ -871,6 +978,7 @@ function draw() {
     updateDiceAnim();
     drawAllDice();
     drawPlayerInfo();
+    drawLandscapeSideControls();
     drawInfo();
 
     if (useInfoAlpha) drawingContext.restore();
@@ -882,7 +990,12 @@ function draw() {
     drawMovablePiecesHalo();
     drawLearnHint();
   }
-  drawModal();
+  // Modal masqué quand l'overlay profil (stats) est ouvert : sinon le modal
+  // d'attente (ex: 'accept double') transparaît sous le voile sombre du
+  // profil et donne l'illusion qu'on peut le cliquer. On force le joueur à
+  // fermer d'abord les stats (un clic n'importe où) avant de répondre au
+  // modal — le modal réapparaît au frame suivant.
+  if (!profileOverlay) drawModal();
   // Game-over caché en mode lobby (room/waiting) : quand la fenêtre room
   // s'affiche, on ne veut PAS voir le texte "GAME OVER / WINNER WINS / RESIGN…"
   // transparaître à travers le voile sombre du lobby.
@@ -892,11 +1005,37 @@ function draw() {
   drawPlayerProfile();   // overlay profil joueur (clic sur nom)
   // EXIT en dernier pour qu'il soit toujours visible (room, game-over, jeu, overlay profil)
   drawExitButton();
+  // ── Outil de test pip-bar (DEBUG) : petit triangle rouge en bas-gauche.
+  // Au clic, incrémente cycliquement mockState.off[turn] de 0 à 15 pour
+  // vérifier visuellement le positionnement et l'allumage des pip-bars.
+  // À retirer quand l'intégration backend Firebase est finie.
+  if (gameMode && !gameWinner && appState === 'game') {
+    const tcx = r * 1.2, tcy = windowHeight - r * 1.2, tsz = r * 0.9;
+    fill(220, 60, 60); noStroke();
+    triangle(tcx, tcy - tsz, tcx - tsz * 0.866, tcy + tsz / 2, tcx + tsz * 0.866, tcy + tsz / 2);
+  }
 
   // ── Transition SIGN OUT : voile noir s'opacifie par-dessus la scène ───────
   // Quand le voile atteint sa pleine opacité, on bascule sur appState='signin'
   // (qui sera dessiné à pleine opacité au frame suivant). La scène en cours
   // (jeu / room / etc.) reste visible mais s'efface progressivement sous le
+  // ── Transition waiting → game : fade-out du voile noir + GMMN pour
+  // révéler le board en douceur après acceptation de l'invitation. Le
+  // board est déjà dessiné en-dessous (rendu normal du jeu), on superpose
+  // juste le voile + GMMN avec opacité globale décroissante.
+  if (waitingFadeOutT0 > 0) {
+    const elapsed = millis() - waitingFadeOutT0;
+    const fadeP   = Math.min(1, elapsed / WAITING_FADE_OUT_DUR);
+    const ctx = drawingContext;
+    ctx.save();
+    ctx.globalAlpha = 1 - fadeP;
+    drawMessageVeil(0.86);
+    drawIntroFrame(1.0);
+    drawGommanHollow(1.0);
+    ctx.restore();
+    if (fadeP >= 1) waitingFadeOutT0 = 0;
+  }
+
   // voile — plus naturel qu'un fade-in du sign-in.
   if (signoutTransitionT0 > 0) {
     const el = millis() - signoutTransitionT0;
@@ -911,6 +1050,7 @@ function draw() {
       signoutTransitionT0 = 0;
       appState = 'signin';
       signinMode = 'choice';
+      partnersExpanded = false;       // referme le sous-menu PARTNERS
       menuT0 = millis();              // restart fade-in des boutons sign-in
     }
   }
@@ -1040,10 +1180,16 @@ function drawGommanHollow(titleAlpha) {
   ctx.textAlign    = 'left';
   ctx.textBaseline = 'middle';
   // Clip du 1/3 inférieur du texte (calculé sur la taille NORMALE des
-  // lettres, pas la taille réduite du glyph).
+  // lettres, pas la taille réduite du glyph). On clip UNIQUEMENT y >
+  // clipBottom — la partie supérieure du texte doit pouvoir déborder hors
+  // du clip rect (notamment en paysage iOS où la rotation 90° place une
+  // partie du glyphe au-dessus du canvas en local pre-rotation). Ancienne
+  // version `rect(0, 0, windowWidth, clipBottom)` coupait la partie
+  // supérieure du titre quand le canvas était plus court que sz/2.
   const clipBottom = cyC + sz / 6;
+  const HUGE = (windowWidth + windowHeight) * 2;
   ctx.beginPath();
-  ctx.rect(0, 0, windowWidth, clipBottom);
+  ctx.rect(-HUGE, -HUGE, 3 * HUGE, clipBottom + HUGE);
   ctx.clip();
 
   // Helper : trace TITLE en 5 segments. Lettres G/MM/N : ctx.fillText
@@ -1210,6 +1356,7 @@ function drawIntro() {
     // re-saisir son nick à chaque session.
     appState = 'signin';
     signinMode = 'choice';                  // reset pour garantir l'écran choice
+    partnersExpanded = false;               // sous-menu PARTNERS fermé par défaut
     menuT0   = millis();                    // démarre le fade-in des options
   }
 }
@@ -1385,11 +1532,21 @@ function drawMenuOptions(alpha) {
   // désormais contre l'IA en passant par ONLINE puis en sélectionnant un
   // adversaire COMPUTER#N dans la lobby (cf. ROOM_PLAYERS). Cela simplifie
   // l'écran d'entrée à 3 actions : ONLINE, LEARN, SIGN OUT.
-  const buttons = [
-    { id: 'online',  label: 'ONLINE',   disabled: false },
-    { id: 'learn',   label: 'LEARN',    disabled: false },   // mode pédagogique vs IA
-    { id: 'signout', label: 'SIGN OUT', disabled: false },
-  ];
+  // Si l'utilisateur est en mode GUEST (nick préfixé 'INV_' dans submitSignin),
+  // SIGN OUT est masqué — un guest ne s'est pas authentifié, donc "sign out"
+  // n'a pas de sens. À la place, un bouton [ BACK ] est dessiné EN DEHORS du
+  // cadre (cf. plus bas) pour ramener à l'écran de départ.
+  const isGuest = typeof userNick === 'string' && userNick.startsWith('INV_');
+  const buttons = isGuest
+    ? [
+        { id: 'online',  label: 'PLAY',  disabled: false },
+        { id: 'learn',   label: 'LEARN', disabled: false },
+      ]
+    : [
+        { id: 'online',  label: 'PLAY',     disabled: false },
+        { id: 'learn',   label: 'LEARN',    disabled: false },   // mode pédagogique vs IA
+        { id: 'signout', label: 'SIGN OUT', disabled: false },
+      ];
   const cxC = bx + 13 * a / 2;
   const btnSize = r * 1.425 * MSG_SCALE;  // 1.5× agrandi (r*0.95 → r*1.425)
   const gap     = btnSize * 1.6;          // espace vertical large (cohérent sign-in)
@@ -1441,6 +1598,32 @@ function drawMenuOptions(alpha) {
       });
     }
   }
+
+  // Bouton [ BACK ] dessiné EN DEHORS du cadre — visible UNIQUEMENT en
+  // mode guest. Ramène à l'écran de départ (signin/choice) ; reset le nick
+  // pour permettre une nouvelle saisie.
+  if (isGuest && alpha >= 0.9) {
+    const ctx = drawingContext;
+    const backLabel = '[ BACK ]';
+    const backSize  = r * 0.95 * MSG_SCALE;
+    const backCX    = bx + 13 * a / 2;
+    const backY     = by + 13 * a + r * 1.5;
+    ctx.save();
+    ctx.font         = `${backSize}px ${TITLE_FONT_CSS}`;
+    ctx.textAlign    = 'center';
+    ctx.textBaseline = 'top';
+    const tw = ctx.measureText(backLabel).width;
+    const isHover = mouseX >= backCX - tw/2 - r*0.4 && mouseX <= backCX + tw/2 + r*0.4
+                 && mouseY >= backY - r*0.2        && mouseY <= backY + backSize * 1.2;
+    const opa = isHover ? 255 : 128;
+    ctx.fillStyle = `rgba(${red(C.ivory)},${green(C.ivory)},${blue(C.ivory)},${(opa * alpha) / 255})`;
+    ctx.fillText(backLabel, backCX, backY);
+    ctx.restore();
+    menuBtns.push({
+      x: backCX - tw/2 - r*0.4, y: backY - r*0.2,
+      w: tw + r*0.8, h: backSize * 1.4, id: 'back',
+    });
+  }
 }
 
 // ── Sign-in : saisie du nickname (clé localStorage 'bg:nick' partagée jpep) ──
@@ -1465,66 +1648,291 @@ function drawSigninOptions(alpha) {
   const labelY = by + 13*a * 0.40;
 
   if (signinMode === 'choice') {
-    // 2 boutons : SIGN IN / GUEST (mêmes styles que le menu mode select)
-    // Pas de titre/sous-titre — les boutons parlent d'eux-mêmes.
-    // Centrés horizontalement sur le centre du PLATEAU (cohérent avec le
-    // titre G⌂MM⌂N) et empilés verticalement autour du CENTRE du carré
-    // (50 %) — le titre est désormais EN DEHORS du carré (au-dessus), donc
-    // on a tout l'espace intérieur du carré pour le contenu.
-    // Texte agrandi 1.5× (r*0.95 → r*1.425).
+    // Layout cible (cf. maquette UX) :
+    //   SIGN IN
+    //   CONTINUE WITH GOOGLE
+    //   CONTINUE WITH APPLE
+    //   (espace)
+    //   PLAY AS GUEST
+    //   (espace en bas du cadre)
+    //   New user?  Create new account    (footer hors-cadre)
+    // Typographie : PIX-80 (TITLE_FONT_CSS), cohérente avec le titre GMMN.
     const cxC = bx + 13 * a / 2;
     const btnSize = r * 1.425 * MSG_SCALE;
-    const gap = btnSize * 1.6;          // espace vertical bien plus large
+    const gap     = btnSize * 0.55;
+
+    // type : 'btn' (cliquable), 'gap' (espace vertical sans rendu)
+    // LOG IN retiré du choice : l'option "création de compte" est désormais
+    // accessible UNIQUEMENT via le footer "New user? Create new account" en
+    // partie basse du cadre.
+    const items = [
+      { type: 'btn', id: 'full',   label: 'SIGN IN' },
+      { type: 'gap' },
+      { type: 'btn', id: 'google', label: 'CONTINUE WITH GOOGLE' },
+      { type: 'btn', id: 'apple',  label: 'CONTINUE WITH APPLE' },
+      { type: 'gap' },
+      { type: 'btn', id: 'guest',  label: 'PLAY AS GUEST' },
+    ];
+
+    // Hauteur de chaque item
+    const itemH = (it) => {
+      if (it.type === 'btn') return btnSize;
+      if (it.type === 'gap') return btnSize * 0.4;
+      return 0;
+    };
+    // Gap avant un item donné (selon types adjacents)
+    const gapBefore = (it, prev) => {
+      if (!prev) return 0;
+      if (it.type === 'gap' || prev.type === 'gap') return 0;
+      return gap;
+    };
+
+    let totalH = 0;
+    for (let i = 0; i < items.length; i++) {
+      totalH += itemH(items[i]) + gapBefore(items[i], items[i - 1]);
+    }
     const groupCY = by + 13*a * 0.50;
-    const startY = groupCY - btnSize - gap / 2;
-    const buttons = [{ id: 'full', label: 'SIGN IN' }, { id: 'guest', label: 'GUEST' }];
-    textFont(fontLarge); textSize(btnSize); textAlign(CENTER, TOP);
-    for (let i = 0; i < buttons.length; i++) {
-      const b = buttons[i];
-      const ty = startY + i * (btnSize + gap);
-      const tw = textWidth(b.label);
-      const isHover = mouseX >= cxC - tw/2 - btnSize*0.4 && mouseX <= cxC + tw/2 + btnSize*0.4
-                   && mouseY >= ty - btnSize*0.2 && mouseY <= ty + btnSize * 1.2;
-      // Surbrillance hover : panneau ivoire translucide derrière le label,
-      // dessiné AVANT le texte pour que le label reste lisible au-dessus.
-      if (isHover) {
-        noStroke();
-        fill(red(C.ivory), green(C.ivory), blue(C.ivory), 32 * alpha);
-        const padX = btnSize * 0.45;
-        const padTop = btnSize * 0.10;
-        const padBot = btnSize * 0.18;
-        rect(cxC - tw/2 - padX, ty - padTop, tw + padX*2, btnSize + padTop + padBot, btnSize * 0.18);
+    let ty        = groupCY - totalH / 2;
+
+    const ctx = drawingContext;
+    ctx.save();
+    ctx.textBaseline = 'top';
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      if (i > 0) ty += gapBefore(it, items[i - 1]);
+      if (it.type === 'btn') {
+        ctx.font      = `${btnSize}px ${TITLE_FONT_CSS}`;
+        ctx.textAlign = 'center';
+        const tw = ctx.measureText(it.label).width;
+        const isHover = mouseX >= cxC - tw/2 - btnSize*0.4 && mouseX <= cxC + tw/2 + btnSize*0.4
+                     && mouseY >= ty - btnSize*0.2        && mouseY <= ty + btnSize * 1.2;
+        const opa = isHover ? 255 : 128;
+        ctx.fillStyle = `rgba(${red(C.ivory)},${green(C.ivory)},${blue(C.ivory)},${(opa * alpha) / 255})`;
+        ctx.fillText(it.label, cxC, ty);
+        if (alpha >= 0.9) {
+          signinChoiceBtns.push({
+            x: cxC - tw/2 - btnSize*0.6, y: ty - btnSize*0.2,
+            w: tw + btnSize*1.2, h: btnSize * 1.4, id: it.id,
+          });
+        }
       }
-      const opa = isHover ? 255 : 128;
-      fill(red(C.ivory), green(C.ivory), blue(C.ivory), opa * alpha);
-      text(b.label, cxC, ty);
-      if (alpha >= 0.9) {
-        signinChoiceBtns.push({
-          x: cxC - tw/2 - btnSize*0.6, y: ty - btnSize*0.2,
-          w: tw + btnSize*1.2, h: btnSize * 1.4,
-          id: b.id,
-        });
-      }
+      // type 'gap' : ne dessine rien, contribue juste à l'avancement de ty.
+      ty += itemH(it);
+    }
+    ctx.restore();
+
+    // ── Footer dans le cadre (partie basse) : "New user?  Create new account"
+    // Lien discret en bas du cadre. Le clic bascule en signinMode='login'
+    // (création de compte) — seul point d'entrée vers le mode 'login' depuis
+    // que LOG IN a été retiré des boutons du choice.
+    if (alpha >= 0.9) {
+      const ctx2 = drawingContext;
+      const footerSz = r * 0.89 * MSG_SCALE;   // 0.7 + 10 % + 15 %
+      const fyTop = by + 13 * a - r * 1.5 - footerSz;
+      const prefix = 'New user?  ';
+      const linkLbl = 'Create new account';
+      ctx2.save();
+      ctx2.font         = `${footerSz}px ${TITLE_FONT_CSS}`;
+      ctx2.textAlign    = 'left';
+      ctx2.textBaseline = 'top';
+      const wPrefix = ctx2.measureText(prefix).width;
+      const wLink   = ctx2.measureText(linkLbl).width;
+      const totalW  = wPrefix + wLink;
+      const fx0     = cxC - totalW / 2;
+      const linkX0  = fx0 + wPrefix;
+      const isHover = mouseX >= linkX0 - r*0.3 && mouseX <= linkX0 + wLink + r*0.3
+                   && mouseY >= fyTop - r*0.2 && mouseY <= fyTop + footerSz * 1.2;
+      ctx2.fillStyle = `rgba(${red(C.ivory)},${green(C.ivory)},${blue(C.ivory)},${(110 * alpha) / 255})`;
+      ctx2.fillText(prefix, fx0, fyTop);
+      const linkOpa = isHover ? 255 : 180;
+      ctx2.fillStyle = `rgba(${red(C.ivory)},${green(C.ivory)},${blue(C.ivory)},${(linkOpa * alpha) / 255})`;
+      ctx2.fillText(linkLbl, linkX0, fyTop);
+      ctx2.restore();
+      signinChoiceBtns.push({
+        x: linkX0 - r*0.3, y: fyTop - r*0.2,
+        w: wLink + r*0.6, h: footerSz * 1.4, id: 'login',   // alias LOG IN
+      });
     }
     return;
   }
 
-  // Modes 'full' et 'guest' : pas de titre/sous-titre — les placeholders
-  // des inputs (NICKNAME, PASSWORD, GUEST NAME) sont auto-explicatifs.
+  // Modes 'full', 'login' et 'guest' : pas de titre/sous-titre — les
+  // placeholders des inputs (EMAIL, PASSWORD, GUEST NAME) sont auto-
+  // explicatifs.
   if (alpha >= 0.7) {
     if (!signinInputEl) createSigninInputs(signinMode);
     positionSigninInputs(signinMode);
-    if (signinInputEl) signinInputEl.style.opacity = String(alpha);
-    if (signinPassEl)  signinPassEl.style.opacity  = String(alpha);
+    // Restaure la visibilité de tous les inputs (au retour depuis 'about'
+    // ou après création — TOUS les inputs sont sync sur le même alpha).
+    const showInput = (el) => {
+      if (!el) return;
+      el.style.display = '';
+      el.style.opacity = String(alpha);
+    };
+    showInput(signinInputEl);
+    showInput(signinEmailEl);
+    showInput(signinPassEl);
+    showInput(signinVerifyEl);
+  }
+
+  // ── Remember me + Forgot Password? ─ sous les inputs (modes full/login) ─
+  // Placeholders pour l'instant. Remember me toggle local ; Forgot Password?
+  // log dans la console. En mode 'login' (création de compte) on N'AFFICHE
+  // PAS Forgot Password? — l'utilisateur n'a pas encore de compte donc le
+  // flux de reset n'a pas de sens.
+  // Position : centre vertical à mi-distance entre passBot et cadre bottom.
+  // Taille rowSize=0.8r (compromis : assez lisible sans chevauchement).
+  // Largeur ÉLARGIE à 13a*0.78 (vs 0.65 des inputs) pour que les deux
+  // labels tiennent côte à côte sans se chevaucher.
+  if ((signinMode === 'full' || signinMode === 'login') && alpha >= 0.9) {
+    const inputH = r * 2.7;
+    const groupCY = by + 13*a * 0.35;
+    // Calcul du BAS du dernier input selon mode (2 vs 4 inputs)
+    let lastInputBot;
+    if (signinMode === 'login') {
+      const gapInputs = r * 1.0;
+      const total4 = 4 * inputH + 3 * gapInputs;
+      lastInputBot = groupCY - total4 / 2 + total4;
+    } else {
+      const gapInputs = r * 1.425 * MSG_SCALE * 1.6;
+      const firstTop = groupCY - inputH - gapInputs / 2;
+      lastInputBot = firstTop + inputH + gapInputs + inputH;
+    }
+    const rowSize  = r * 0.8 * MSG_SCALE;
+    const cadreBot = by + 13 * a;
+    const rowY     = (lastInputBot + cadreBot) / 2 - rowSize / 2;
+    const rowW     = 13*a * 0.78;
+    const rowLeft  = (windowWidth - rowW) / 2;
+    const rowRight = rowLeft + rowW;
+
+    const ctx = drawingContext;
+    ctx.save();
+    ctx.font         = `${rowSize}px ${TITLE_FONT_CSS}`;
+    ctx.textBaseline = 'top';
+
+    // Checkbox + "Remember me" — à GAUCHE en 'full' (à côté de Forgot),
+    // CENTRÉ en 'login' (= seul élément de la ligne).
+    const boxSz = rowSize * 0.85;
+    const boxY  = rowY + (rowSize - boxSz) / 2;
+    const rememberLbl = 'Remember me';
+    ctx.font = `${rowSize}px ${TITLE_FONT_CSS}`;
+    const rememberTextW = ctx.measureText(rememberLbl).width;
+    const rememberBlockW = boxSz + r * 0.3 + rememberTextW;
+    const rememberBoxX = (signinMode === 'login')
+      ? (windowWidth - rememberBlockW) / 2     // centré horizontalement
+      : rowLeft;                                // à gauche
+    ctx.lineWidth   = 1;
+    ctx.strokeStyle = `rgba(${red(C.ivory)},${green(C.ivory)},${blue(C.ivory)},${(180 * alpha) / 255})`;
+    ctx.strokeRect(rememberBoxX, boxY, boxSz, boxSz);
+    if (rememberMe) {
+      ctx.fillStyle = `rgba(${red(C.ivory)},${green(C.ivory)},${blue(C.ivory)},${(220 * alpha) / 255})`;
+      ctx.fillRect(rememberBoxX + 2, boxY + 2, boxSz - 4, boxSz - 4);
+    }
+    ctx.textAlign = 'left';
+    ctx.fillStyle = `rgba(${red(C.ivory)},${green(C.ivory)},${blue(C.ivory)},${(170 * alpha) / 255})`;
+    ctx.fillText(rememberLbl, rememberBoxX + boxSz + r * 0.3, rowY);
+    signinChoiceBtns.push({
+      x: rememberBoxX, y: rowY - r*0.15,
+      w: rememberBlockW, h: rowSize * 1.3, id: 'remember',
+    });
+
+    // "Forgot Password?" (droite) — UNIQUEMENT en mode 'full' (SIGN IN).
+    // Pas en mode 'login' (création de compte) — l'utilisateur n'a pas
+    // encore de compte donc "mot de passe oublié" n'a pas de sens.
+    if (signinMode === 'full') {
+      ctx.textAlign = 'right';
+      const forgotLbl = 'Forgot Password?';
+      const forgotW = ctx.measureText(forgotLbl).width;
+      const forgotHover = mouseX >= rowRight - forgotW - r*0.3
+                       && mouseX <= rowRight + r*0.3
+                       && mouseY >= rowY - r*0.15
+                       && mouseY <= rowY + rowSize * 1.15;
+      ctx.fillStyle = `rgba(${red(C.ivory)},${green(C.ivory)},${blue(C.ivory)},${((forgotHover ? 230 : 170) * alpha) / 255})`;
+      ctx.fillText(forgotLbl, rowRight, rowY);
+      signinChoiceBtns.push({
+        x: rowRight - forgotW - r*0.3, y: rowY - r*0.15,
+        w: forgotW + r * 0.6, h: rowSize * 1.3, id: 'forgot',
+      });
+    }
+    ctx.restore();
+
+    // ── Bouton CREATE (mode 'login' uniquement) — fade-in quand les 4
+    // inputs sont remplis ET le password matche le verify. Sinon affiché
+    // en opacité réduite pour signaler que la validation manque.
+    if (signinMode === 'login') {
+      const name   = (signinInputEl  && signinInputEl.value  || '').trim();
+      const email  = (signinEmailEl  && signinEmailEl.value  || '').trim();
+      const pass   = (signinPassEl   && signinPassEl.value   || '');
+      const verify = (signinVerifyEl && signinVerifyEl.value || '');
+      const valid  = !!(name && email && pass && verify && pass === verify);
+      const createSize = r * 1.1 * MSG_SCALE;
+      const createCX   = bx + 13 * a / 2;
+      // Centré entre verifyBot (= lastInputBot) et Remember me (rowY top).
+      const createY    = (lastInputBot + (rowY - r*0.15)) / 2 - createSize / 2;
+      const ctx2 = drawingContext;
+      ctx2.save();
+      ctx2.font         = `${createSize}px ${TITLE_FONT_CSS}`;
+      ctx2.textAlign    = 'center';
+      ctx2.textBaseline = 'top';
+      const createW = ctx2.measureText('CREATE').width;
+      const isHover = valid
+                   && mouseX >= createCX - createW/2 - r*0.4
+                   && mouseX <= createCX + createW/2 + r*0.4
+                   && mouseY >= createY - r*0.2
+                   && mouseY <= createY + createSize * 1.2;
+      // Opacité : 255 si hover, 200 si valid, 50 si pas valid (fade-in
+      // progressif quand l'utilisateur remplit le formulaire).
+      const createOpa = isHover ? 255 : (valid ? 200 : 50);
+      ctx2.fillStyle = `rgba(${red(C.ivory)},${green(C.ivory)},${blue(C.ivory)},${(createOpa * alpha) / 255})`;
+      ctx2.fillText('CREATE', createCX, createY);
+      ctx2.restore();
+      if (valid) {
+        signinChoiceBtns.push({
+          x: createCX - createW/2 - r*0.4, y: createY - r*0.2,
+          w: createW + r*0.8, h: createSize * 1.4, id: 'create',
+        });
+      }
+    }
+  }
+
+  // Bouton [ BACK ] dessiné DANS le cadre, en partie basse (à 1.5r du bord
+  // inférieur) — ramène au choice screen depuis les sous-modes (full /
+  // login / guest). Même typo PIX-80 et même opacité hover que les boutons
+  // du choice.
+  if (alpha >= 0.9) {
+    const ctx = drawingContext;
+    const backLabel = '[ BACK ]';
+    const backSize  = r * 0.95 * MSG_SCALE;
+    const backCX    = bx + 13 * a / 2;
+    const backY     = by + 13 * a - r * 1.5 - backSize;
+    ctx.save();
+    ctx.font         = `${backSize}px ${TITLE_FONT_CSS}`;
+    ctx.textAlign    = 'center';
+    ctx.textBaseline = 'top';
+    const tw = ctx.measureText(backLabel).width;
+    const isHover = mouseX >= backCX - tw/2 - r*0.4 && mouseX <= backCX + tw/2 + r*0.4
+                 && mouseY >= backY - r*0.2        && mouseY <= backY + backSize * 1.2;
+    const opa = isHover ? 255 : 128;
+    ctx.fillStyle = `rgba(${red(C.ivory)},${green(C.ivory)},${blue(C.ivory)},${(opa * alpha) / 255})`;
+    ctx.fillText(backLabel, backCX, backY);
+    ctx.restore();
+    signinChoiceBtns.push({
+      x: backCX - tw/2 - r*0.4, y: backY - r*0.2,
+      w: tw + r*0.8, h: backSize * 1.4, id: 'back',
+    });
   }
 }
 
-function makeSigninInput(placeholder, maxLen, isPass) {
+function makeSigninInput(placeholder, maxLen, isPass, isEmail) {
   const el = document.createElement('input');
-  el.type = isPass ? 'password' : 'text';
+  el.type = isPass ? 'password' : (isEmail ? 'email' : 'text');
   el.maxLength = maxLen;
   el.autocomplete = 'off';
-  el.autocapitalize = isPass ? 'off' : 'characters';
+  // Pas d'auto-capitalisation ni de transform CSS — l'utilisateur choisit
+  // librement majuscules, minuscules et chiffres pour son pseudo / email.
+  // Email keyboard sur mobile via type='email' (suggère "@" et désactive
+  // déjà autocaps).
+  el.autocapitalize = 'off';
   el.spellcheck = false;
   el.placeholder = placeholder;
   el.style.position    = 'absolute';
@@ -1533,25 +1941,48 @@ function makeSigninInput(placeholder, maxLen, isPass) {
   el.style.border      = 'none';
   el.style.outline     = 'none';
   el.style.textAlign   = 'center';
-  el.style.textTransform = isPass ? 'none' : 'uppercase';
+  el.style.textTransform = 'none';
   el.style.letterSpacing = '0.05em';
   el.style.fontFamily  = NAME_FONT_CSS;
   el.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') { e.preventDefault(); submitSignin(); }
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      // Enchaînement Enter → champ suivant. Submit sur le dernier.
+      //   'login' : NAME → EMAIL → PASSWORD → VERIFY → submit
+      //   'full'  : EMAIL → PASSWORD → submit
+      //   'guest' : GUEST NAME → submit
+      if (e.target === signinInputEl) {
+        if (signinEmailEl) { signinEmailEl.focus(); return; }
+        if (signinPassEl)  { signinPassEl.focus();  return; }
+      } else if (e.target === signinEmailEl && signinPassEl) {
+        signinPassEl.focus(); return;
+      } else if (e.target === signinPassEl && signinVerifyEl) {
+        signinVerifyEl.focus(); return;
+      }
+      submitSignin();
+    }
   });
   document.body.appendChild(el);
   return el;
 }
 
 function createSigninInputs(mode) {
-  if (mode === 'full') {
-    // 12 caractères max — limite globale pour les noms de joueurs.
-    signinInputEl = makeSigninInput('NICKNAME', 12, false);
-    signinPassEl  = makeSigninInput('PASSWORD', 32, true);
+  if (mode === 'login') {
+    // Création de compte : 4 inputs (NAME, EMAIL, PASSWORD, VERIFY PASSWORD).
+    // VERIFY doit matcher PASSWORD côté submit.
+    signinInputEl  = makeSigninInput('NAME', 20, false, false);
+    signinEmailEl  = makeSigninInput('EMAIL', 30, false, true);
+    signinPassEl   = makeSigninInput('PASSWORD', 32, true, false);
+    signinVerifyEl = makeSigninInput('VERIFY PASSWORD', 32, true, false);
+    setTimeout(() => signinInputEl && signinInputEl.focus(), 50);
+  } else if (mode === 'full') {
+    // Connexion à un compte existant : EMAIL + PASSWORD.
+    signinInputEl = makeSigninInput('EMAIL', 30, false, true);
+    signinPassEl  = makeSigninInput('PASSWORD', 32, true, false);
     setTimeout(() => signinInputEl && signinInputEl.focus(), 50);
   } else if (mode === 'guest') {
     // 8 caractères max → INV_ (4) + nom (8) = 12 caractères total.
-    signinInputEl = makeSigninInput('GUEST NAME', 8, false);
+    signinInputEl = makeSigninInput('GUEST NAME', 8, false, false);
     signinPassEl  = null;
     setTimeout(() => signinInputEl && signinInputEl.focus(), 50);
   }
@@ -1559,53 +1990,89 @@ function createSigninInputs(mode) {
 
 function positionSigninInputs(mode) {
   if (!signinInputEl) return;
-  // Tailles 1.5× (input box height + font) cohérent avec les boutons sign-in.
-  const w = 13*a * 0.65;
+  // Tailles : en mode 'login' le placeholder le plus long est "VERIFY
+  // PASSWORD" (15 caractères) → on élargit la zone et on réduit la police
+  // pour qu'il rentre en entier. 'full'/'guest' gardent les tailles
+  // d'origine (textes courts EMAIL/PASSWORD/GUEST NAME).
+  const w = (mode === 'login') ? 13*a * 0.78 : 13*a * 0.65;
   const h = r * 2.7;
-  const fontSize = `${Math.round(r * 1.5 * MSG_SCALE)}px`;
-  // Centrage vertical sur le CENTRE du carré (50 %), homogène avec les
-  // boutons sign-in / mode-select. Espacement entre inputs cohérent avec
-  // les boutons (≈ btnSize × 1.6).
-  const groupCY  = by + 13*a * 0.50;
-  const gapInputs = r * 1.425 * MSG_SCALE * 1.6;
+  const fontSize = (mode === 'login')
+    ? `${Math.round(r * 0.95 * MSG_SCALE)}px`
+    : `${Math.round(r * 1.5 * MSG_SCALE)}px`;
+  // Centrage vertical : 35 % du carré pour les modes 'full'/'login' (laisse
+  // de la place sous les inputs pour Remember me/Forgot + BACK), 50 %
+  // (centré) pour 'guest' (1 seul input, pas d'éléments en dessous).
+  const groupCY  = (mode === 'full' || mode === 'login')
+    ? by + 13*a * 0.35
+    : by + 13*a * 0.50;
+  // Gap entre inputs : standard pour 'full' (2 inputs), réduit pour 'login'
+  // (4 inputs — NAME, EMAIL, PASSWORD, VERIFY PASSWORD — il faut serrer).
+  const gapInputs = (mode === 'login')
+    ? r * 1.0
+    : r * 1.425 * MSG_SCALE * 1.6;
   const left = (windowWidth - w) / 2;
 
-  let firstTop;
-  if (mode === 'full' && signinPassEl) {
-    // 2 inputs : centrés autour de groupCY
-    firstTop = groupCY - h - gapInputs / 2;
-  } else {
-    // 1 input (guest) : centré sur groupCY
-    firstTop = groupCY - h / 2;
+  function place(el, top) {
+    if (!el) return;
+    el.style.left   = `${left}px`;
+    el.style.top    = `${top}px`;
+    el.style.width  = `${w}px`;
+    el.style.height = `${h}px`;
+    el.style.fontSize = fontSize;
   }
 
-  signinInputEl.style.left   = `${left}px`;
-  signinInputEl.style.top    = `${firstTop}px`;
-  signinInputEl.style.width  = `${w}px`;
-  signinInputEl.style.height = `${h}px`;
-  signinInputEl.style.fontSize = fontSize;
-
-  if (mode === 'full' && signinPassEl) {
-    const passTop = firstTop + h + gapInputs;
-    signinPassEl.style.left   = `${left}px`;
-    signinPassEl.style.top    = `${passTop}px`;
-    signinPassEl.style.width  = `${w}px`;
-    signinPassEl.style.height = `${h}px`;
-    signinPassEl.style.fontSize = fontSize;
+  if (mode === 'login') {
+    // 4 inputs centrés autour de groupCY
+    const total4 = 4 * h + 3 * gapInputs;
+    const firstTop = groupCY - total4 / 2;
+    place(signinInputEl,  firstTop);
+    place(signinEmailEl,  firstTop + (h + gapInputs));
+    place(signinPassEl,   firstTop + 2 * (h + gapInputs));
+    place(signinVerifyEl, firstTop + 3 * (h + gapInputs));
+  } else if (mode === 'full') {
+    // 2 inputs centrés autour de groupCY
+    const firstTop = groupCY - h - gapInputs / 2;
+    place(signinInputEl, firstTop);
+    place(signinPassEl,  firstTop + h + gapInputs);
+  } else {
+    // 1 input (guest) centré sur groupCY
+    place(signinInputEl, groupCY - h / 2);
   }
 }
 
 function submitSignin() {
-  if (signinMode === 'full') {
+  if (signinMode === 'login') {
+    // CRÉATION DE COMPTE : 4 inputs requis, PASSWORD doit matcher VERIFY.
+    if (!signinInputEl || !signinEmailEl || !signinPassEl || !signinVerifyEl) return;
+    const name   = (signinInputEl.value  || '').trim();
+    const email  = (signinEmailEl.value  || '').trim();
+    const pass   = (signinPassEl.value   || '');
+    const verify = (signinVerifyEl.value || '');
+    if (!name || !email || !pass || !verify) return;     // tous requis
+    if (pass !== verify) return;                          // passwords doivent matcher
+    // Nickname stocké : préfixe du NAME tronqué à 12 chars, casse conservée.
+    const nick = name.slice(0, 12);
+    if (!nick) return;
+    try { localStorage.setItem(NICK_STORAGE_KEY, nick); } catch (e) {}
+    applyUserNick(nick);
+    // TODO : déclencher l'envoi d'un email de vérification via le backend
+    // jpep (Firebase Auth createUserWithEmailAndPassword + sendEmailVerification).
+  } else if (signinMode === 'full') {
     if (!signinInputEl || !signinPassEl) return;
-    const raw  = (signinInputEl.value || '').trim().toUpperCase();
-    const pass = (signinPassEl.value || '');
-    if (!raw || !pass) return;          // les deux requis
-    try { localStorage.setItem(NICK_STORAGE_KEY, raw); } catch (e) {}
-    applyUserNick(raw);
+    const emailRaw = (signinInputEl.value || '').trim();
+    const pass     = (signinPassEl.value || '');
+    if (!emailRaw || !pass) return;     // les deux requis
+    // Dérive un nickname à partir de l'email : préfixe avant @, tronqué à
+    // 12 caractères. La casse est CONSERVÉE telle que saisie.
+    const prefix = emailRaw.includes('@') ? emailRaw.split('@')[0] : emailRaw;
+    const nick   = prefix.slice(0, 12);
+    if (!nick) return;
+    try { localStorage.setItem(NICK_STORAGE_KEY, nick); } catch (e) {}
+    applyUserNick(nick);
   } else if (signinMode === 'guest') {
     if (!signinInputEl) return;
-    const raw = (signinInputEl.value || '').trim().toUpperCase();
+    // Casse libre — l'utilisateur choisit majuscules, minuscules, chiffres.
+    const raw = (signinInputEl.value || '').trim();
     if (!raw) return;
     const finalName = 'INV_' + raw;
     try { localStorage.setItem(NICK_STORAGE_KEY, finalName); } catch (e) {}
@@ -1615,18 +2082,22 @@ function submitSignin() {
   }
   destroySigninInput();
   signinMode = 'choice';                // reset pour la prochaine fois
+  partnersExpanded = false;             // referme le sous-menu PARTNERS
   appState = 'menu';
 }
 
 function destroySigninInput() {
-  if (signinInputEl && signinInputEl.parentNode) {
-    signinInputEl.parentNode.removeChild(signinInputEl);
-  }
-  signinInputEl = null;
-  if (signinPassEl && signinPassEl.parentNode) {
-    signinPassEl.parentNode.removeChild(signinPassEl);
-  }
-  signinPassEl = null;
+  const removeAndNull = (el) => {
+    if (el && el.parentNode) el.parentNode.removeChild(el);
+  };
+  removeAndNull(signinInputEl);
+  removeAndNull(signinEmailEl);
+  removeAndNull(signinPassEl);
+  removeAndNull(signinVerifyEl);
+  signinInputEl  = null;
+  signinEmailEl  = null;
+  signinPassEl   = null;
+  signinVerifyEl = null;
 }
 
 // ── Notice "double promise" : en bas de l'écran, fade out après 3s ───────────
@@ -1639,44 +2110,30 @@ function drawDoublePromiseNotice() {
 
   if (doublePromiseT0 === null) doublePromiseT0 = millis();
   const elapsed     = millis() - doublePromiseT0;
-  const fadeInDur   = 600;          // ms : fade IN à l'apparition (smootherstep)
   const fadeStart   = 3000;         // ms : début du fade OUT
   const fadeOutDur  = 2000;         // ms : durée du fade OUT
-  let alpha;
-  if (elapsed < fadeInDur) {
-    // Fade IN smoothstep — cube + textes apparaissent en douceur ensemble.
-    alpha = smootherstep(elapsed / fadeInDur);
-  } else if (elapsed > fadeStart) {
-    // Fade OUT linéaire après le délai de lecture.
+  // Apparition instantanée (pas de fade IN), puis fade OUT linéaire après
+  // le délai de lecture.
+  let alpha = 1;
+  if (elapsed > fadeStart) {
     alpha = 1 - (elapsed - fadeStart) / fadeOutDur;
     if (alpha <= 0) return;
-  } else {
-    alpha = 1;                       // pleine opacité entre fadeIn et fadeStart
   }
 
-  // Position : sur l'AXE CENTRAL HORIZONTAL du plateau (= barre centrale).
-  // On utilise directement G.axis et NON pas (cyW+cyB)/2 — depuis l'ajout
-  // du VISUAL_BIAS sur cyB, leur midpoint dérive de quelques pixels vers
-  // le haut. G.axis garantit le placement EXACT sur la barre.
+  // Position : EXACTEMENT au centre vertical du plateau dans les deux modes,
+  // sur la barre centrale (= bx + 6.5a, by + 6.5a). Cohérent entre paysage et
+  // portrait — auparavant le paysage plaçait la notice AU-DESSUS du plateau,
+  // ce qui désaxait la lecture par rapport au portrait.
   const cx = windowWidth / 2;
-  let cy;
-  const canvasTopSafe = r / 2;
-  if (diceOnSide) {
-    // Paysage : pas de bearing-off vertical → on garde l'ancien repère
-    // (1/3 entre le haut du plateau et le bord supérieur du canvas).
-    cy = canvasTopSafe + (by - canvasTopSafe) * 2 / 3;
-  } else {
-    const G = offGeomPortrait();
-    cy = G.axis;                          // axe central horizontal du plateau
-  }
+  const cy = by + 6.5 * a;
   // Symbole du cube à la valeur APRÈS doublage (cubeValue × 2) — même glyphe
   // que celui dessiné par drawDoublingCube (❶❷❹❽…). Rendu via PIX60_FONT_CSS :
   // nortechico-60 (PIX poids light) en priorité, fallback Noto Sans pour les
   // dingbats absents de PIX. Lettres/digits restent rendus par PIX-60.
   // Layout en 3 morceaux centré sur la BARRE CENTRALE du plateau (bx + 6.5a) :
-  //   "ON YOUR NEXT TURN"  [cube]  "BEFORE YOU ROLL"
-  //                          ↑
-  //                    centre du plateau
+  //   "Double first"  [cube]  "before rolling"
+  //                     ↑
+  //               centre du plateau
   // Le cube est dessiné centered sur la barre ; les 2 lignes de texte sont
   // alignées RIGHT (gauche) et LEFT (droite) à un gap fixe du cube.
   const v   = (typeof cubeValue !== 'undefined') ? cubeValue : 1;
@@ -1688,20 +2145,8 @@ function drawDoublePromiseNotice() {
   const barCX = bx + 6.5 * a;                   // centre horizontal du plateau (= barre)
   const ctx = drawingContext;
   ctx.save();
-  // Effacement local des deux traits verticaux de la barre dans la zone
-  // du cube (uniquement en portrait, où la notice s'affiche sur l'axe
-  // central du plateau). Bandes fines C.bar — ne touche pas le fond
-  // intérieur de la barre.
-  if (!diceOnSide) {
-    const barLX  = bx + 6 * a;
-    const barRX  = bx + 7 * a;
-    const SW     = 3;
-    const padV   = cubeSz * 0.30;
-    const maskH  = cubeSz + padV * 2;
-    ctx.fillStyle = `rgba(${red(C.bar)},${green(C.bar)},${blue(C.bar)},${alpha})`;
-    ctx.fillRect(barLX - SW / 2, cy - maskH / 2, SW, maskH);
-    ctx.fillRect(barRX - SW / 2, cy - maskH / 2, SW, maskH);
-  }
+  // (Masquage des traits verticaux de la barre supprimé — le texte et le
+  // cube s'affichent directement par-dessus la barre, sans nettoyage local.)
   ctx.textBaseline = 'middle';
   ctx.fillStyle    = `rgba(${red(C.ivory)},${green(C.ivory)},${blue(C.ivory)},${alpha})`;
   // Cube au centre exact de la barre — sa propre taille (1.2 × sz)
@@ -1717,9 +2162,9 @@ function drawDoublePromiseNotice() {
   const barHalfW   = a / 2;          // = r (demi-largeur de la barre)
   const textGap    = r;              // espace texte ↔ arête de la barre
   ctx.textAlign = 'right';
-  ctx.fillText('ON YOUR NEXT TURN', barCX - barHalfW - textGap, cy);
+  ctx.fillText('Double first', barCX - barHalfW - textGap, cy);
   ctx.textAlign = 'left';
-  ctx.fillText('BEFORE YOU ROLL', barCX + barHalfW + textGap, cy);
+  ctx.fillText('before rolling', barCX + barHalfW + textGap, cy);
   ctx.restore();
 }
 
@@ -1920,6 +2365,10 @@ function drawExitButton() {
   // SEULE exception : un modal actif autre que game-over masque le bouton
   // pour ne pas distraire l'attention de la décision en cours.
   if (modalState && !(gameMode && gameWinner)) return;
+  // En partie active : l'exit est dessiné par drawLandscapeSideControls()
+  // (paysage : marge gauche, portrait : bande haute) — on évite le doublon
+  // ici. drawExitButton reprend en game-over / lobby / waiting / signin.
+  if (appState === 'game' && gameMode && !gameWinner) return;
 
   const arrow = '→';   // → RIGHTWARDS ARROW
   const rect0 = '⁰';   // ⁰ porte (U+2070 SUPERSCRIPT ZERO — rendu rectangulaire en nortechico)
@@ -1958,6 +2407,115 @@ function drawExitButton() {
   exitBtns.push({ x, y, w: totalW, h: sz });
 }
 
+// (drawPipBars supprimée — drawOffLandscape gère désormais le rendu de la
+// pip-bar horizontale conforme DXF *U17.)
+
+// ── Drapeau + Exit + Cube : empilés verticalement (paysage) ou alignés
+// horizontalement (portrait), dans la marge externe à 2r du bord du canvas.
+// Visible UNIQUEMENT en partie active (game, hors game-over). En game-over /
+// lobby / overlays, c'est drawExitButton (bas-droite) qui prend la relève —
+// son `if (appState==='game' && gameMode && !gameWinner) return` évite le
+// doublon. Ordre paysage top→bot et portrait left→right : Drapeau, Exit, Cube.
+function drawLandscapeSideControls() {
+  if (appState !== 'game' || !gameMode || gameWinner) return;
+  if (modalState && !(gameMode && gameWinner)) return;
+
+  const itemSp = 3 * r;
+
+  // Helpers — chacun dessine son glyphe centré (CENTER, CENTER) sur (cx, cy)
+  // pour un alignement visuel cohérent entre les 3 éléments. Toutes les
+  // tailles fontSize sont calibrées à r*1.61 (= r*1.4 × 1.15, +15 %) pour
+  // donner une hauteur visible similaire au cube ❶ (textSize = rad*2.4).
+  const GLYPH = r * 1.61;
+  function drawFlagAt(cx, cy) {
+    // iOS Safari rend le glyphe ⚐ visuellement plus petit que sur desktop —
+    // on l'agrandit de 1.5× pour rester visible et cliquable au doigt.
+    const sz = GLYPH * (IS_IOS ? 1.5 : 1);
+    textFont('Arial'); textSize(sz);
+    textAlign(CENTER, CENTER);
+    const flagW  = textWidth('⚐');
+    const flagX0 = cx - flagW / 2;
+    const flagY0 = cy - sz / 2;
+    const isHover = mouseX >= flagX0 && mouseX <= flagX0 + flagW
+                 && mouseY >= flagY0 && mouseY <= flagY0 + sz;
+    const modalOpen = modalState && modalState.type === 'resign'
+                   && modalState.player === LOCAL_PLAYER;
+    const showAsk = isHover || modalOpen;
+    noStroke(); fill(C.ivory);
+    text(showAsk ? '⚑' : '⚐', cx, cy);
+    resignBtn = { x: flagX0, y: flagY0, w: flagW, h: sz, player: LOCAL_PLAYER };
+  }
+
+  function drawExitAt(cx, cy) {
+    if (fontLarge) textFont(fontLarge);
+    textSize(GLYPH);
+    const arrowW = textWidth('→');
+    const szRct  = GLYPH * 0.825;
+    textSize(szRct);
+    const doorW  = textWidth('⁰');
+    const gapEx  = GLYPH * 0.15;
+    const totalW = arrowW + gapEx + doorW;
+    noStroke(); fill(C.ivory);
+    // La métrique de la flèche '→' et de '⁰' (porte) en nortechico place
+    // le glyphe dans la moitié BASSE de la box → en `textAlign(LEFT,CENTER)`
+    // ils tombent visuellement plus bas que les autres glyphes alignés sur
+    // cy. Compensation : remonter la baseline d'environ 0.25·GLYPH
+    // (calibration finale par paliers de 0.15 : -0.55 trop haut → -0.40
+    // encore haut → -0.25 calé).
+    const yShift = -GLYPH * 0.25;
+    textAlign(LEFT, CENTER);
+    textSize(GLYPH);
+    text('→', cx - totalW / 2, cy + yShift);
+    textSize(szRct);
+    text('⁰', cx - totalW / 2 + arrowW + gapEx, cy + yShift);
+    exitBtns.push({ x: cx - totalW / 2, y: cy - GLYPH / 2, w: totalW, h: GLYPH });
+  }
+
+  function drawCubeAt(cx, cy) {
+    const cubeR    = GLYPH / 2.4;     // rad tel que textSize = rad*2.4 = GLYPH
+    const isCurrent = mockState.turn === LOCAL_PLAYER;
+    drawDoublingCube(cx, cy, cubeR, LOCAL_PLAYER, isCurrent);
+  }
+
+  // Disposition unifiée (paysage ET portrait) : pictogrammes éclatés et
+  // alignés sur le BORD DROIT du canvas.
+  //   Flag : coin supérieur DROIT (légèrement écarté du bord supérieur)
+  //   Cube : juste sous le Flag (même bord droit)
+  //   Exit : coin inférieur DROIT (même bord droit, à margin du bord bas)
+  // Tous à `margin` du bord droit (le plus faible possible).
+  const ctx = drawingContext;
+  const margin = 0.6 * r;
+  const rightX = windowWidth - margin;
+  const topMargin = 1.0 * r;
+
+  // Flag (haut-droite) — mesure sa largeur réelle pour aligner bord droit.
+  const flagH = GLYPH * (IS_IOS ? 1.5 : 1);
+  ctx.font = `${flagH}px Arial`;
+  const flagWidth = ctx.measureText('⚐').width;
+  const cxFlag = rightX - flagWidth / 2;
+  const cyFlag = topMargin + flagH / 2;
+  drawFlagAt(cxFlag, cyFlag);
+
+  // Cube (sous le flag, avec un léger gap visuel pour distinguer les deux
+  // pictogrammes — 0.7r donne une respiration discrète sans trop écarter
+  // verticalement le cube du drapeau).
+  const cxCube = rightX - GLYPH / 2;
+  const cyCube = cyFlag + flagH / 2 + 0.7 * r + GLYPH / 2;
+  drawCubeAt(cxCube, cyCube);
+
+  // Exit (bas-droite) — calcul de la largeur totale (flèche + porte).
+  const exitSz = GLYPH;
+  const szRct  = exitSz * 0.825;
+  ctx.font = `${exitSz}px ${TITLE_FONT_CSS}`;
+  const arrowW = ctx.measureText('→').width;
+  ctx.font = `${szRct}px ${TITLE_FONT_CSS}`;
+  const doorW = ctx.measureText('⁰').width;
+  const exitTotalW = arrowW + exitSz * 0.15 + doorW;
+  const cxExit = rightX - exitTotalW / 2;
+  const cyExit = windowHeight - margin - exitSz / 2;
+  drawExitAt(cxExit, cyExit);
+}
+
 // ── Lobby (Room) — liste des joueurs disponibles ─────────────────────────────
 // Layout :
 //   - Titre "ROOM" en haut
@@ -1968,6 +2526,11 @@ function drawExitButton() {
 function drawRoom() {
   noStroke(); fill(0, 0, 0, 200);
   rect(0, 0, windowWidth, windowHeight);
+
+  // Titre GMMN (figé, plein opacité) — cliquable pour ouvrir l'écran about
+  // (équivalent du bouton "i" build-info de l'app principale Lumpzammon).
+  // gmmnTitleBtn est mis à jour à l'intérieur de drawGommanHollow.
+  drawGommanHollow(1.0);
 
   // Cadre = mêmes coords que le plateau (contour extérieur)
   noFill(); stroke(C.ivory); strokeWeight(1.5);
@@ -2102,14 +2665,49 @@ function drawRoom() {
       });
     }
   }
+
+  // ── Texte SIGN OUT — à droite du cadre en paysage, en dessous en portrait ──
+  // Pas de pictogramme : depuis la lobby le seul "ailleurs" disponible est
+  // l'écran sign-in, donc le mot suffit. Marge généreuse au bord droit du
+  // plateau (≈ 2.4r) pour laisser respirer le cadre.
+  roomSignoutBtn = null;
+  const isLandscapeRoom = windowWidth >= windowHeight * 1.1;
+  const soLabel   = 'SIGN OUT';
+  const soLabelSz = r * 0.85 * MSG_SCALE;
+  textAlign(LEFT, TOP); textFont(fontLarge);
+  textSize(soLabelSz);
+  const soLabelW = textWidth(soLabel);
+
+  let soX, soY;
+  if (isLandscapeRoom) {
+    // À droite du cadre, centré verticalement, écart ≈ 2.4r du bord droit
+    soX = bx + 13*a + r * 2.4;
+    soY = by + 13*a / 2 - soLabelSz / 2;
+  } else {
+    // En dessous du cadre, centré horizontalement, écart ≈ 1.8r du bord bas
+    soX = bx + (13*a - soLabelW) / 2;
+    soY = by + 13*a + r * 1.8;
+  }
+
+  noStroke(); fill(C.ivory);
+  text(soLabel, soX, soY);
+
+  roomSignoutBtn = {
+    x: soX,
+    y: soY,
+    w: soLabelW,
+    h: soLabelSz
+  };
 }
 
 // ── Modal d'attente d'acceptation d'invitation ───────────────────────────────
 // Mêmes tailles et écarts que drawModal (offer/resign/quit) pour cohérence :
 // titre = 1.1r, action = 1.0r, gap titre→action = 5.4r (titre à -2.4r, action à +3.0r).
 function drawWaiting() {
-  noStroke(); fill(0, 0, 0, 200);
-  rect(0, 0, windowWidth, windowHeight);
+  // Voile sombre + titre GMMN en creux (cohérent avec menu / signin / about).
+  drawMessageVeil(0.86);
+  drawIntroFrame(1.0);
+  drawGommanHollow(1.0);
 
   const cx = windowWidth / 2;
   const cy = windowHeight / 2;
@@ -2155,7 +2753,11 @@ function drawPlayerProfile() {
                 || (player === 'white' ? 'WHITE' : 'BLACK');
   const szName  = r * 2.4;
   // Fallback Noto Sans pour caractères non-PIX (JP/CN/AR…) — via ctx direct
-  drawNameText(baseName, innerX, yCur, szName, C.ivory, 'top');
+  // Nom forcé en majuscules DANS LA FENÊTRE STATS uniquement : évite le
+  // chevauchement avec la ligne d'info en dessous (les descenders g/p/j
+  // des minuscules débordaient la box). Le stockage du nick conserve la
+  // casse libre — c'est juste l'affichage du profil qui uppercase.
+  drawNameText(baseName.toUpperCase(), innerX, yCur, szName, C.ivory, 'top');
   yCur += szName * 1.1;
 
   // ── Ligne 2 : (mpScoreCumulé) gros + XX% + 🥧 + total + 📊 + #RANK ─────────
@@ -2977,15 +3579,28 @@ function drawTri(x, baseY, pointUp, isDark, isTarget, isSnapped, pt) {
 function ptCenterX(pt) {
   if (pt === 0) {
     // Off zone : center X du prochain slot (pour le drag visual / animation).
-    // En portrait : pile horizontale → idx-ième fiche à x0 - w - idx*step
-    // En paysage  : grille 8×N à droite du plateau
+    // En paysage  : pip-bar horizontale (1×15) à droite du plateau, conforme
+    //               DXF *U17 — innerX = bx + 13a + r, step = (4/6)·r, trait
+    //               (2.5/6)·r de large. Le prochain slot = traitW/2 + idx·step.
+    // En portrait : pile horizontale → idx-ième fiche à x0 - w - idx·step.
+    // En mode MIRROR : la pip-bar est dessinée HORS du push miroir (cf.
+    // draw()), mais le drag est dessiné DANS le push miroir. Pour que le
+    // snap atterrisse visuellement sur la pip-bar, on doit pré-inverser X
+    // de sorte que le flip du push le ramène à la bonne position canvas.
     const idx = mockState.turn === 'white' ? mockState.off.white : mockState.off.black;
+    let x;
     if (diceOnSide) {
-      const w = 2*r, colW = w + r/2;
-      return bx + 13*a + r + Math.floor(idx/8)*colW + w/2;
+      const traitW = (2.5 / 6) * r;
+      const step   = (4 / 6) * r;
+      const innerX = bx + 13 * a + r;
+      x = innerX + idx * step + traitW / 2;
+    } else {
+      // PORTRAIT : pip-bar horizontale partant de G.x0 (= bord gauche du
+      // dé 2). 1ère pièce à G.x0, suivantes à G.x0 + i*step.
+      const G = offGeomPortrait();
+      x = G.x0 + idx * G.step + G.w / 2;
     }
-    const G = offGeomPortrait();
-    return G.x0 - G.w - idx * G.step + G.w/2;
+    return mirrorMode ? mirrorX(x) : x;
   }
   let lx;
   if      (pt >=  1 && pt <=  6) lx = bx + (13-pt)*a;
@@ -2998,13 +3613,10 @@ function ptCenterX(pt) {
 function ptNextY(pt) {
   if (pt === 0) {
     // Off zone : center Y du prochain slot
+    // Paysage : centre du trait pip-bar du joueur (white = by + 9.5a,
+    //           black = by + 3.5a).
     if (diceOnSide) {
-      const h = r * 0.4, step = h + h, cy = by + 6.5*a;
-      const idx = mockState.turn === 'white' ? mockState.off.white : mockState.off.black;
-      const pos = idx % 8;
-      return mockState.turn === 'white'
-        ? cy + r + pos*step + h/2
-        : cy - r - pos*step - h/2;
+      return mockState.turn === 'white' ? (by + 9.5 * a) : (by + 3.5 * a);
     }
     const G = offGeomPortrait();
     return mockState.turn === 'white' ? G.yW + G.h/2 : G.yB + G.h/2;
@@ -3247,8 +3859,8 @@ function pieceXY(pt, isWhite) {
       return { x, y };
     }
     const G = offGeomPortrait();
-    const x = G.x0 - G.w - idx * G.step + G.w/2;
-    const y = isWhite ? G.yW + G.h/2 : G.yB + G.h/2;
+    const x = G.x0 + idx * G.step + G.w / 2;
+    const y = isWhite ? G.cyW : G.cyB;
     return { x, y };
   }
   return { x: ptCenterX(pt), y: ptTopY(pt) };
@@ -3466,17 +4078,34 @@ function drawDraggedChecker() {
   // pt 13-24 (haut plateau, pile vers le bas sur le plateau) → empile vers le bas depuis curseur
   const isBot = (drag.fromPt !== 'bar') && (drag.fromPt <= 12);
   const dy = isBot ? -1 : 1;
+
+  // Animation rotation-vers-rectangle quand la pièce s'aimante vers la
+  // pip-bar de bearing-off (drag.snapPt === 0). La pièce se "retourne" sur
+  // son axe vertical : largeur du cercle (2r) → largeur du trait pip-bar
+  // (2.5/6·r = 0.417r). Hauteur inchangée (2r). Coins arrondis (radius)
+  // qui passent de r (cercle parfait) à 0 (rectangle plat de profil).
+  if (typeof drag.snapT !== 'number') drag.snapT = 0;
+  const tgtT  = (drag.snapPt === 0) ? 1 : 0;
+  drag.snapT  = lerp(drag.snapT, tgtT, 0.13);
+  const traitW = (2.5 / 6) * r;
+  const width  = lerp(2 * r, traitW, drag.snapT);
+  const height = 2 * r;
+  const cornerR = lerp(r, 0, drag.snapT);
+
   noStroke();
   fill(0, 0, 0, 25);
-  ellipse(drag.dispX + 2, drag.dispY + 3, 2*r + 8, 2*r + 8);
+  rect(drag.dispX - (width + 8) / 2 + 2,
+       drag.dispY - (height + 8) / 2 + 3,
+       width + 8, height + 8, cornerR + 4);
   // Couleur du fond pour le symbole nortechico (basée sur le point d'origine)
   const dragBg  = drag.fromPt === 'bar' ? C.bar : triColorForPoint(drag.fromPt);
-  const showSym = dragBg && typeof userNick !== 'undefined' && userNick === 'NORTECHICO';
+  const showSym = dragBg && typeof userNick !== 'undefined' && userNick === 'NORTECHICO'
+                && drag.snapT < 0.5;   // symbole caché quand la pièce s'aplatit
   for (let i = 0; i < N; i++) {
     const cx = drag.dispX;
     const cy = drag.dispY + dy * i * a;
     fill(isWhite ? C.offwhite : C.ruby);
-    ellipse(cx, cy, 2*r, 2*r);
+    rect(cx - width / 2, cy - height / 2, width, height, cornerR);
     if (showSym) {
       const markCol = isWhite ? dragBg : C.offwhite;
       drawNortechicoMark(cx, cy, markCol);
@@ -3526,7 +4155,20 @@ function mousePressed() {
   if (appState === 'intro') {
     appState = 'signin';
     signinMode = 'choice';
+    partnersExpanded = false;
     return;
+  }
+
+  // ── DEBUG : triangle rouge en bas-gauche → incrémente off[turn] cycliquement
+  // (0→15→0). Permet de tester l'affichage de la pip-bar sans bear-off réel.
+  if (gameMode && !gameWinner && appState === 'game') {
+    const tcx = r * 1.2, tcy = windowHeight - r * 1.2, tsz = r * 0.9;
+    if (mouseX >= tcx - tsz && mouseX <= tcx + tsz
+        && mouseY >= tcy - tsz && mouseY <= tcy + tsz) {
+      const pl = mockState.turn;
+      mockState.off[pl] = ((mockState.off[pl] || 0) + 1) % 16;
+      return;
+    }
   }
 
   // ── Mode LEARN : un tip pédagogique est en attente → on le ferme
@@ -3539,9 +4181,20 @@ function mousePressed() {
     // pas de return → le clic propage à la suite du handler
   }
 
-  // ── About : un tap n'importe où ferme l'overlay → retour au menu ──
+  // ── About : un tap n'importe où ferme l'overlay → retour à l'écran d'origine ──
+  // (menu si ouvert depuis le menu, room si ouvert depuis la lobby, signin
+  // si ouvert depuis le sign-in)
   if (appState === 'about') {
-    appState = 'menu';
+    appState = aboutReturnState || 'menu';
+    // Au retour vers le sign-in : ré-affiche l'input et redonne le focus
+    // pour réouvrir le clavier mobile et permettre à l'utilisateur de
+    // saisir nickname/password (sans ça, le clavier restait fermé après
+    // la fermeture de l'about car le focus avait été perdu).
+    if (appState === 'signin' && signinInputEl) {
+      signinInputEl.style.display = '';
+      if (signinPassEl) signinPassEl.style.display = '';
+      setTimeout(() => signinInputEl && signinInputEl.focus(), 50);
+    }
     return;
   }
 
@@ -3554,6 +4207,7 @@ function mousePressed() {
     if (gmmnTitleBtn
         && mouseX >= gmmnTitleBtn.x && mouseX <= gmmnTitleBtn.x + gmmnTitleBtn.w
         && mouseY >= gmmnTitleBtn.y && mouseY <= gmmnTitleBtn.y + gmmnTitleBtn.h) {
+      aboutReturnState = 'menu';
       appState = 'about';
       return;
     }
@@ -3567,6 +4221,18 @@ function mousePressed() {
           try { localStorage.removeItem(NICK_STORAGE_KEY); } catch (e) {}
           userNick = null;
           signoutTransitionT0 = millis();
+          return;
+        }
+        // BACK (guest seulement) : reset le nick INV_* et bascule direct vers
+        // l'écran sign-in/choice — pas de transition fade-noir car ce n'est
+        // pas un sign-out (l'utilisateur n'avait pas de compte authentifié).
+        if (btn.id === 'back') {
+          try { localStorage.removeItem(NICK_STORAGE_KEY); } catch (e) {}
+          userNick = null;
+          appState = 'signin';
+          signinMode = 'choice';
+          partnersExpanded = false;
+          menuT0 = millis();
           return;
         }
         gameModeSelected = btn.id;
@@ -3603,15 +4269,67 @@ function mousePressed() {
   //  - 'choice' : clic sur SIGN IN / GUEST → bascule en sous-mode correspondant
   //  - 'full' / 'guest' : tap n'importe où soumet (input garde le focus mobile)
   if (appState === 'signin') {
+    // Clic sur le titre GMMN → ouvre l'about screen, même AVANT que le
+    // joueur ait saisi nickname/password. Le check passe en premier pour
+    // que la zone cliquable du titre prenne la priorité sur les boutons
+    // SIGN IN / GUEST et sur le tap-to-submit des formulaires.
+    if (gmmnTitleBtn
+        && mouseX >= gmmnTitleBtn.x && mouseX <= gmmnTitleBtn.x + gmmnTitleBtn.w
+        && mouseY >= gmmnTitleBtn.y && mouseY <= gmmnTitleBtn.y + gmmnTitleBtn.h) {
+      aboutReturnState = 'signin';
+      appState = 'about';
+      return;
+    }
     if (signinMode === 'choice') {
       for (const btn of signinChoiceBtns) {
         if (mouseX >= btn.x && mouseX <= btn.x + btn.w
             && mouseY >= btn.y && mouseY <= btn.y + btn.h) {
-          signinMode = btn.id;   // 'full' ou 'guest'
+          // OAuth partners : placeholder — la connexion via Google / Apple /
+          // Meta / Other sera branchée plus tard sur le backend (cf. jpep
+          // github principal).
+          if (btn.id === 'google' || btn.id === 'apple'
+              || btn.id === 'meta' || btn.id === 'other') {
+            console.log(`[partner-signin] ${btn.id} — to be wired up via jpep`);
+            return;
+          }
+          // LOG IN (création de compte) ou SIGN IN (connexion existante) :
+          // bascule sur le formulaire NICKNAME + PASSWORD. 'login' et 'full'
+          // partagent le même formulaire pour l'instant — la distinction
+          // côté serveur (création vs login) viendra avec le backend.
+          signinMode = btn.id;   // 'login' | 'full' | 'guest'
           return;
         }
       }
       return;
+    }
+    // Sous-modes 'full' / 'login' / 'guest' : actions par id de la zone
+    // cliquée. Si aucune zone n'est touchée, tap-to-submit du formulaire.
+    for (const btn of signinChoiceBtns) {
+      if (mouseX >= btn.x && mouseX <= btn.x + btn.w
+          && mouseY >= btn.y && mouseY <= btn.y + btn.h) {
+        if (btn.id === 'back') {
+          destroySigninInput();
+          signinMode = 'choice';
+          return;
+        }
+        if (btn.id === 'remember') {
+          rememberMe = !rememberMe;
+          return;
+        }
+        if (btn.id === 'forgot') {
+          // Placeholder : flux "mot de passe oublié" à brancher sur Firebase
+          // Auth (envoi d'un email de réinitialisation).
+          console.log('[signin] Forgot Password? — to be wired up via jpep');
+          return;
+        }
+        if (btn.id === 'create') {
+          // Bouton CREATE : déclenche submitSignin (qui revalide les 4
+          // champs + pass === verify ; à brancher sur Firebase Auth pour
+          // l'envoi d'email de vérification — cf. TODO submitSignin).
+          submitSignin();
+          return;
+        }
+      }
     }
     submitSignin();
     return;
@@ -3644,6 +4362,26 @@ function mousePressed() {
         return;
       }
     }
+    // Clic sur le titre GMMN → ouvre l'about screen (équivalent du bouton "i"
+    // de l'app principale). À la fermeture, on revient au room.
+    if (gmmnTitleBtn
+        && mouseX >= gmmnTitleBtn.x && mouseX <= gmmnTitleBtn.x + gmmnTitleBtn.w
+        && mouseY >= gmmnTitleBtn.y && mouseY <= gmmnTitleBtn.y + gmmnTitleBtn.h) {
+      aboutReturnState = 'room';
+      appState = 'about';
+      return;
+    }
+    // Icône SIGN OUT (à droite du cadre en paysage, en dessous en portrait) :
+    // même comportement que le SIGN OUT du menu / du profil — reset nickname
+    // + transition fade-noir vers l'écran sign-in.
+    if (roomSignoutBtn
+        && mouseX >= roomSignoutBtn.x && mouseX <= roomSignoutBtn.x + roomSignoutBtn.w
+        && mouseY >= roomSignoutBtn.y && mouseY <= roomSignoutBtn.y + roomSignoutBtn.h) {
+      try { localStorage.removeItem(NICK_STORAGE_KEY); } catch (e) {}
+      userNick = null;
+      signoutTransitionT0 = millis();
+      return;
+    }
     // Bloc LOCAL (nom + score en top-left) : clic ouvre les stats LOCAL.
     if (roomLocalBtn
         && mouseX >= roomLocalBtn.x && mouseX <= roomLocalBtn.x + roomLocalBtn.w
@@ -3670,10 +4408,45 @@ function mousePressed() {
           && mouseY >= btn.y && mouseY <= btn.y + btn.h) {
         inviteTarget = btn.player;
         appState = 'waiting';
+        // Bascule miroir + nouveau fond DÈS LE CLIC (pas dans le setTimeout) :
+        //   1. Le swap CSS du body se fait pendant la fenêtre d'attente (1.5 s),
+        //      avec le voile à 86 % d'opacité qui masque presque entièrement le
+        //      changement de fond (seuls 14 % de transparence laissent passer).
+        //   2. Quand le fade-out du voile démarre 1.5 s plus tard, le bgImage,
+        //      la palette et le body bg URL sont déjà à jour ET l'image est en
+        //      cache navigateur → aucun changement de fond visible PENDANT le
+        //      fade-out (continuité visuelle garantie).
+        //   3. Évite le "pop noir" qui survenait juste après la fin du fade-out :
+        //      avant, le setTimeout déclenchait loadImage en parallèle du fade-
+        //      out → quand le callback finissait par poser la nouvelle URL CSS,
+        //      le browser repaintait avec sa background-color (#000) le temps
+        //      de décoder la nouvelle image → flash noir.
+        mirrorMode = !mirrorMode;
+        const nextFond = FOND_LIST[Math.floor(Math.random() * FOND_LIST.length)];
+        currentFond = nextFond;
+        loadImage(fondUrl(currentFond), (img) => {
+          // Si l'utilisateur a annulé entre temps (CANCEL ou navigation) →
+          // on applique quand même : le fond reste valide pour le prochain
+          // affichage du jeu, et il sera de toute façon écrasé au prochain
+          // changement de partie.
+          bgImage = img;
+          dominantHue = extractDominantHue(img);
+          buildPalette();
+          document.body.style.backgroundImage = `url('${fondUrl(currentFond)}')`;
+        });
         // Mock : l'adversaire accepte automatiquement après 1.5 s
         setTimeout(() => {
           if (appState === 'waiting' && inviteTarget === btn.player) {
             appState = 'game';
+            // Déclenche le fade-out doux du voile noir + GMMN pour révéler
+            // progressivement le board (cf. drawWaitingFadeOutIfActive).
+            waitingFadeOutT0 = millis();
+            // En SUPERPOSITION LÉGÈRE : fade-in des textes/pictogrammes/dés
+            // démarre quasi en même temps que le fade-out du voile (les 2
+            // se chevauchent ~50 % puisque mêmes durées 800 ms). Donne un
+            // effet "le board s'éclaire de l'intérieur" plutôt que "le
+            // voile s'efface sur des éléments déjà visibles".
+            infoFadeT0 = millis();
             // COMPUTER#N : adversaire IA — bascule en aiMode pour que
             // l'opposant soit géré par adapter.js (waitForDiceThenAITurn,
             // playAITurn, etc.). Pour les humains (online classique) on
@@ -3684,16 +4457,6 @@ function mousePressed() {
             if (typeof gameScore !== 'undefined') {
               gameScore.white = 0; gameScore.black = 0;
             }
-            // Bascule miroir + nouveau fond entre deux parties
-            mirrorMode = !mirrorMode;
-            const next = FOND_LIST[Math.floor(Math.random() * FOND_LIST.length)];
-            currentFond = next;
-            loadImage(fondUrl(currentFond), (img) => {
-              bgImage = img;
-              dominantHue = extractDominantHue(img);
-              buildPalette();
-              document.body.style.backgroundImage = `url('${fondUrl(currentFond)}')`;
-            });
             startGame();
             checkerAppearT0 = 0;   // pas de fade-in : fiches à couleur finale directe
             inviteTarget = null;
@@ -3711,6 +4474,25 @@ function mousePressed() {
       appState = 'room';
       inviteTarget = null;
     }
+    return;
+  }
+
+  // Overlay profil ouvert : intercepté AVANT le modal handler pour que tout
+  // clic ferme d'abord les stats — sinon un modal d'attente actif derrière
+  // (ex: 'accept double') volerait le clic et empêcherait la fermeture.
+  //  - clic sur SIGN OUT  → reset nickname + transition fade-noir vers signin
+  //  - clic n'importe où  → ferme l'overlay (le modal réapparaît au frame suivant)
+  if (profileOverlay) {
+    if (signoutBtn
+        && mouseX >= signoutBtn.x && mouseX <= signoutBtn.x + signoutBtn.w
+        && mouseY >= signoutBtn.y && mouseY <= signoutBtn.y + signoutBtn.h) {
+      try { localStorage.removeItem(NICK_STORAGE_KEY); } catch (e) {}
+      userNick = null;
+      profileOverlay = null;
+      signoutTransitionT0 = millis();
+      return;
+    }
+    profileOverlay = null;
     return;
   }
 
@@ -3804,6 +4586,12 @@ function mousePressed() {
       appState = 'menu';
       menuT0 = millis();
       gameModeSelected = null;
+      // Reset défensif des états transitoires (cohérent avec NO REVENGE)
+      modalState  = null;
+      modalBtns   = null;
+      cubePromised = null;
+      profileOverlay = null;
+      signoutTransitionT0 = 0;
       return;
     }
     if (aiMode) {
@@ -3836,6 +4624,14 @@ function mousePressed() {
         appState = 'menu';
         menuT0 = millis();           // restart fade-in du menu
         gameModeSelected = null;
+        // Reset défensif des états transitoires de la partie qui peuvent
+        // empêcher le clic sur SIGN OUT depuis le menu (handler R7+Quit ou
+        // profileOverlay attrapent le clic en priorité s'ils restent set).
+        modalState  = null;
+        modalBtns   = null;
+        cubePromised = null;
+        profileOverlay = null;
+        signoutTransitionT0 = 0;
         return;
       }
       // Clic ailleurs : ignoré (le joueur doit choisir YES ou NO)
@@ -3846,26 +4642,9 @@ function mousePressed() {
     return;
   }
 
-  // Si overlay profil ouvert :
-  //  - clic sur SIGN OUT  → reset nickname + retour à l'écran sign-in
-  //  - clic n'importe où  → ferme l'overlay
-  if (profileOverlay) {
-    if (signoutBtn
-        && mouseX >= signoutBtn.x && mouseX <= signoutBtn.x + signoutBtn.w
-        && mouseY >= signoutBtn.y && mouseY <= signoutBtn.y + signoutBtn.h) {
-      try { localStorage.removeItem(NICK_STORAGE_KEY); } catch (e) {}
-      userNick = null;
-      profileOverlay = null;
-      // Au lieu de switcher direct sur appState='signin', on lance une
-      // TRANSITION : la scène en cours (jeu / room) reste affichée mais un
-      // voile noir s'opacifie par-dessus. Quand le voile est complètement
-      // noir, on switche vers 'signin' (qui apparaît à pleine opacité).
-      signoutTransitionT0 = millis();
-      return;
-    }
-    profileOverlay = null;
-    return;
-  }
+  // (Le handler profileOverlay a été déplacé AVANT le modal handler, plus haut,
+  // pour permettre la fermeture des stats même quand un modal d'attente est
+  // actif derrière.)
 
   // Clic sur le nom d'un joueur → ouvre l'overlay profil
   for (const player of ['white', 'black']) {
@@ -3971,6 +4750,7 @@ function mousePressed() {
     drag.mouseX    = drag.dispX = eMx;
     drag.mouseY    = drag.dispY = mouseY;
     drag.snapPt    = null;
+    drag.snapT     = 0;    // facteur d'animation rotation-vers-rectangle (0=cercle, 1=trait)
     break;
   }
 }
@@ -3981,17 +4761,59 @@ function mouseDragged() {
   drag.mouseX = eMx;
   drag.mouseY = mouseY;
   drag.snapPt = null;
+
+  // ── Filtre magnétisme : cible COMBINÉE (P − d1 − d2) exclue si une
+  // position intermédiaire est un BLOT ADVERSE — sinon le snap pouvait
+  // attirer involontairement vers la combinée alors que le user voulait
+  // esquiver le blot (cas vécu sur 11/14 avec 2 dés différents). Pour les
+  // doubles (4 dés identiques) on ne filtre pas : pas de combinaison
+  // ambiguë au sens 2-dés-différents.
+  let combinedPt = null;
+  let combinedHazardous = false;
+  if (drag.fromPt !== 'bar') {
+    const dice = mockState.dice || [];
+    if (dice.length === 2 && dice[0] !== dice[1]) {
+      const playerSign   = mockState.turn === 'white' ? 1 : -1;
+      const moveSign     = -playerSign;        // white avance vers les petits pts
+      const opponentSign = -playerSign;
+      combinedPt = drag.fromPt + moveSign * (dice[0] + dice[1]);
+      const mid0 = drag.fromPt + moveSign * dice[0];
+      const mid1 = drag.fromPt + moveSign * dice[1];
+      const isOppBlot = (pt) => {
+        if (pt < 1 || pt > 24) return false;
+        const val = mockState.points[pt] || 0;
+        return Math.abs(val) === 1 && Math.sign(val) === opponentSign;
+      };
+      combinedHazardous = isOppBlot(mid0) || isOppBlot(mid1);
+    }
+  }
+
   for (const tpt of getValidTargets(drag.fromPt)) {
+    if (combinedHazardous && tpt === combinedPt && tpt !== 0) continue;
     if (tpt === 0) {
-      // Off zone : zone large pour faciliter le drop bear-off.
-      // Paysage  : à droite du plateau (anywhere right of the board edge).
-      // Portrait : tout l'espace SOUS le plateau (white) ou AU-DESSUS (black).
+      // Off zone : zone TRÈS large pour faciliter le drop bear-off.
+      // 1) Ancienne zone (proximale) : à droite du plateau (paysage), sous
+      //    (white portrait) ou au-dessus (black portrait).
+      // 2) Extension demandée : n'importe où dans la MOITIÉ de l'écran qui
+      //    correspond à la direction de bearing-off du joueur (basse pour
+      //    white, haute pour black), tant qu'on est en DEHORS du plateau.
+      let inOff = false;
       if (diceOnSide) {
-        if (eMx > bx + 13*a) { drag.snapPt = 0; break; }
+        if (eMx > bx + 13*a) inOff = true;
       } else {
-        if (mockState.turn === 'white' && mouseY > by + 13*a) { drag.snapPt = 0; break; }
-        if (mockState.turn === 'black' && mouseY < by)         { drag.snapPt = 0; break; }
+        if (mockState.turn === 'white' && mouseY > by + 13*a) inOff = true;
+        if (mockState.turn === 'black' && mouseY < by)         inOff = true;
       }
+      if (!inOff) {
+        const halfH    = windowHeight / 2;
+        const inBoard  = (eMx >= bx && eMx <= bx + 13*a
+                       && mouseY >= by && mouseY <= by + 13*a);
+        if (!inBoard) {
+          if (mockState.turn === 'white' && mouseY > halfH) inOff = true;
+          if (mockState.turn === 'black' && mouseY < halfH) inOff = true;
+        }
+      }
+      if (inOff) { drag.snapPt = 0; break; }
     } else {
       if (abs(eMx - ptCenterX(tpt)) <= a / 2) { drag.snapPt = tpt; break; }
     }
@@ -4031,31 +4853,28 @@ function mouseReleased() {
 // Compteur (XX) à gauche de la dernière fiche, jusqu'à (15).
 // Si plus de place : on tronque les fiches mais (XX) affiche le vrai total.
 function offGeomPortrait() {
-  const w    = r * 0.4;
-  const h    = 2 * r;
-  const gap  = (r / 2) * 4/5;        // 0.4r → step = 0.8r
-  const step = w + gap;
-  const x0   = bx + 13*a;
-  const ds   = dieSize();
-  // ── Centre vertical des pièces de bearing-off ─────────────────────────────
-  //  - Joueur (white, bas) : à MI-HAUTEUR entre l'arête basse des dés blancs
-  //    et le bord supérieur de l'icône EXIT (en bas-droite).
-  //  - Adversaire (black, haut) : SYMÉTRIQUE par rapport à l'axe central
-  //    horizontal du plateau (= by + 6.5a), AVEC une compensation visuelle
-  //    (cyB shifté UP) pour que le gap perçu entre score (X) et dés noirs
-  //    soit identique à celui côté blanc. Sans ça la métrique ascender/
-  //    descender de PIX décale le glyphe (X) vers le BAS dans son cy → le
-  //    gap au-dessus paraît plus petit que celui au-dessous (cas symétrique
-  //    inverse). Le shift VISUAL_BIAS rééquilibre la perception.
-  const exitSz   = r * 1.4;
-  const exitTop  = windowHeight - r/2 - exitSz;
-  const dieBotW  = by + 13*a + r*1.6 + ds;     // bas du dé blanc
-  const axis     = by + 6.5*a;                  // axe central du plateau
-  const cyW      = (dieBotW + exitTop) / 2;
-  const VISUAL_BIAS = r * 0.5;                  // compensation ascender PIX
-  const cyB      = 2 * axis - cyW - VISUAL_BIAS;
-  const yW = cyW - h / 2;
-  const yB = cyB - h / 2;
+  // Pip-bar horizontale en portrait (conforme au modèle paysage DXF *U17).
+  // Position : à la suite du score (X) du joueur. Bord gauche de la 1ère
+  // pièce aligné sur le BORD GAUCHE DU DÉ 2 (= bx + ds + r*0.5). cy à la
+  // même hauteur que le score (X) :
+  //   - white (bas) : sous les dés (carré imaginaire à dieGap=0.5r sous le dé)
+  //   - black (haut): au-dessus des dés (symétrique)
+  const w      = (2.5 / 6) * r;     // 0.417r — largeur d'un trait (DXF)
+  const h      = 2 * r;             // hauteur d'un trait
+  const step   = (4 / 6) * r;       // 0.667r — pitch (trait + gap)
+  const gap    = step - w;          // 0.25r — gap entre 2 traits
+  const ds     = dieSize();
+  const dieGap = r * 0.5;
+  const dieW   = getDiePos('white', 0);
+  const dieB   = getDiePos('black', 0);
+  const cyW    = dieW.y + ds + dieGap + ds / 2;
+  const cyB    = dieB.y - dieGap - ds / 2;
+  // Bord gauche pip-bar = bord gauche du DÉ 2 (à la suite du score X qui
+  // est centré sur le DÉ 1).
+  const x0     = bx + ds + r * 0.5;
+  const yW     = cyW - h / 2;
+  const yB     = cyB - h / 2;
+  const axis   = by + 6.5 * a;
   return { w, h, gap, step, x0, yW, yB, cyW, cyB, axis };
 }
 
@@ -4066,104 +4885,108 @@ function drawOff() {
 }
 
 function drawOffPortrait(canBearOff) {
+  // Pip-bar horizontale en portrait — modèle DXF *U17 : 15 traits 0.417r ×
+  // 2r, pitch 0.667r. Remplissage GAUCHE → DROITE depuis G.x0 (= bord
+  // gauche du dé 2). Compteur (NN) collé à droite de la dernière pièce
+  // sortie (masqué si off=0).
   const G = offGeomPortrait();
-  const cntSize = r * 0.82;     // (XX) un poil plus gros pour meilleure lisibilité
+  const cntSize = r * 0.82;
   const cntPad  = r * 0.4;
 
-  drawSideStack('white', C.offwhite, G.yW);
-  drawSideStack('black', C.ruby,     G.yB);
+  drawLinearBar('white', C.offwhite, G.cyW);
+  drawLinearBar('black', C.ruby,     G.cyB);
 
-  function drawSideStack(player, color, y) {
+  function drawLinearBar(player, color, cy) {
     const off       = mockState.off[player];
     const showGhost = canBearOff && mockState.turn === player;
     const totalDraw = off + (showGhost ? 1 : 0);
-    if (totalDraw === 0) return;
 
-    // Cap : combien de fiches tiennent + compteur avant le bord gauche du canvas
-    textFont(fontLarge); textSize(cntSize);
-    const cntStr   = '(' + String(off).padStart(2, '0') + ')';
-    const cntStrW  = textWidth('(15)');
-    const leftSafe = r / 2;
-    const availW   = G.x0 - leftSafe - cntStrW - cntPad;
-    const maxN     = Math.max(0, Math.min(15, Math.floor((availW + G.gap) / G.step)));
-    const visN     = Math.min(totalDraw, maxN);
+    const visN     = Math.min(totalDraw, 15);
     const visOff   = Math.min(off, visN);
     const visGhost = (visN > visOff) ? 1 : 0;
 
-    // Fiches réelles
-    fill(color); noStroke();
-    for (let i = 0; i < visOff; i++) {
-      rect(G.x0 - G.w - i * G.step, y, G.w, G.h);
-    }
-    // Fiche fantôme (prochain bear-off)
-    if (visGhost) {
-      fill(red(color), green(color), blue(color), 153);
-      rect(G.x0 - G.w - visOff * G.step, y, G.w, G.h);
+    const yPiece = cy - G.h / 2;
+
+    if (visOff > 0 || visGhost) {
+      fill(color); noStroke();
+      for (let n = 0; n < visOff; n++) {
+        rect(G.x0 + n * G.step, yPiece, G.w, G.h);
+      }
+      if (visGhost) {
+        fill(red(color), green(color), blue(color), 153);
+        rect(G.x0 + visOff * G.step, yPiece, G.w, G.h);
+      }
     }
 
-    // Compteur (XX) à gauche de la dernière fiche, centré verticalement
-    if (off >= 1) {
+    // Compteur (NN) — à droite de la dernière pièce sortie ; pas affiché
+    // si rien n'est sorti.
+    if (visOff + visGhost > 0) {
       noStroke(); fill(C.ivory);
       textFont(fontLarge); textSize(cntSize);
-      textAlign(RIGHT, CENTER);
-      const lastIdx = Math.max(0, (visOff + visGhost) - 1);
-      const lastX   = G.x0 - G.w - lastIdx * G.step;     // bord gauche dernière fiche
-      text(cntStr, lastX - cntPad, y + G.h / 2);
+      const cntStr = '(' + String(off).padStart(2, '0') + ')';
+      const lastIdx = (visOff + visGhost) - 1;
+      const cntX = G.x0 + lastIdx * G.step + G.w + cntPad;
+      textAlign(LEFT, CENTER);
+      text(cntStr, cntX, cy);
       textAlign(LEFT, TOP);
     }
   }
 }
 
 function drawOffLandscape(canBearOff) {
-  // Layout paysage historique : axe central, fiches 2r × 0.4r empilées
-  // verticalement, white vers le bas, black vers le haut. Compteur (XX) à
-  // l'extrémité de la pile, plafond max 15.
-  const w    = 2*r;
-  const h    = r * 0.4;
-  const gap  = h;
-  const step = h + gap;       // 0.8r
-  const colW = w + r/2;
-  const cy   = by + 6.5*a;
-  const ox   = bx + 13*a + r;
-  const cntSize = r * 0.82;     // (XX) un poil plus gros pour meilleure lisibilité
+  // Layout paysage : barre LINÉAIRE de 15 fiches verticales (largeur
+  // 2.5/6·r = 0.417r, hauteur 2r), pitch 4/6·r = 0.667r (= trait 2.5 + gap
+  // 1.5 DXF). Remplissage CENTRE→EXTÉRIEUR (les pièces sorties allument
+  // les traits depuis le bord interne vers le bord externe). Compteur (NN)
+  // collé à droite de la dernière pièce sortie (n'apparaît pas si off=0).
+  // Positions verticales (centre du board = by + 6.5a) :
+  //   - BLACK (adversaire, haut) : cy = by + 3.5a (= centre - 3a)
+  //   - WHITE (joueur, bas)      : cy = by + 9.5a (= centre + 3a)
+  // X gauche : bx + 13a + r (= 1r après le bord droit du board, à la même
+  // distance que les dés à gauche du board → écart symétrique).
+  const w    = (2.5 / 6) * r;        // 0.417r
+  const h    = 2 * r;
+  const step = (4 / 6) * r;          // 0.667r
+  const innerX  = bx + 13 * a + r;   // bord gauche du 1er trait, à 1r du board
+  const cntSize = r * 0.82;
   const cntPad  = r * 0.4;
 
-  drawSideStack('white', C.offwhite, true);
-  drawSideStack('black', C.ruby,     false);
+  drawLinearBar('white', C.offwhite, by + 9.5 * a);
+  drawLinearBar('black', C.ruby,     by + 3.5 * a);
 
-  function drawSideStack(player, color, growDown) {
+  function drawLinearBar(player, color, cy) {
     const off       = mockState.off[player];
     const showGhost = canBearOff && mockState.turn === player;
     const totalDraw = off + (showGhost ? 1 : 0);
-    if (totalDraw === 0) return;
 
-    // 8 fiches par colonne, on tient sur 2 colonnes max → 16 ≥ 15
     const visN     = Math.min(totalDraw, 15);
     const visOff   = Math.min(off, visN);
     const visGhost = (visN > visOff) ? 1 : 0;
 
-    function px(i) { return ox + Math.floor(i/8) * colW; }
-    function py(i) {
-      const pos = i % 8;
-      return growDown ? cy + r + pos*step : cy - r - pos*step - h;
+    // idx=0 → trait le plus proche du board (innermost) ; idx=14 → outermost.
+    function px(idx) { return innerX + idx * step; }
+    const yPiece = cy - h / 2;
+
+    if (visOff > 0 || visGhost) {
+      fill(color); noStroke();
+      for (let n = 0; n < visOff; n++) rect(px(n), yPiece, w, h);
+      if (visGhost) {
+        fill(red(color), green(color), blue(color), 153);
+        rect(px(visOff), yPiece, w, h);
+      }
     }
 
-    fill(color); noStroke();
-    for (let i = 0; i < visOff; i++) rect(px(i), py(i), w, h);
-    if (visGhost) {
-      fill(red(color), green(color), blue(color), 153);
-      rect(px(visOff), py(visOff), w, h);
-    }
-
-    if (off >= 1) {
+    // Compteur (NN) — affiché UNIQUEMENT si au moins une pièce est sortie
+    // (sinon on laissait un fantôme "(00)" derrière l'adversaire). Collé à
+    // DROITE de la dernière pièce sortie pour suivre le mouvement.
+    if (visOff + visGhost > 0) {
       noStroke(); fill(C.ivory);
       textFont(fontLarge); textSize(cntSize);
       const cntStr = '(' + String(off).padStart(2, '0') + ')';
-      const lastIdx = Math.max(0, (visOff + visGhost) - 1);
-      const cx = px(lastIdx) + w / 2;
-      const cntY = growDown ? py(lastIdx) + h + cntPad : py(lastIdx) - cntPad;
-      textAlign(CENTER, growDown ? TOP : BOTTOM);
-      text(cntStr, cx, cntY);
+      const lastIdx = (visOff + visGhost) - 1;
+      const cntX    = innerX + lastIdx * step + w + cntPad;
+      textAlign(LEFT, CENTER);
+      text(cntStr, cntX, cy);
       textAlign(LEFT, TOP);
     }
   }
@@ -4409,8 +5232,9 @@ function drawPlayerInfo() {
     text(gameStr, cx, y);
     cx += textWidth('(9:99)');
 
-    // Cube de doublage et drapeau RESIGN sont maintenant dessinés à côté du
-    // (X) (score session) — voir drawSessionGroup() / drawSessionScoreNearDie().
+    // Cube de doublage et drapeau RESIGN sont rendus séparément :
+    //   - cube : drawLandscapeSideControls (coin sup-droit)
+    //   - drapeau resign : drawLandscapeSideControls (coin sup-droit, sous le cube)
   }
 
   // Helper : dessine le cube de doublage + drapeau resign à côté d'une
@@ -4534,7 +5358,7 @@ function drawPlayerInfo() {
     // En PAYSAGE (et en PORTRAIT) le score (X) + cube + drapeau ne sont
     // PLUS dessinés inline avec le nom — ils sont placés au-dessus du dé
     // noir et sous le dé blanc, chacun centré sur sa colonne de dés
-    // (cf. drawSessionScoreLandscape ci-dessous).
+    // (cf. drawSessionScoreLandscape / drawSessionScoreNearDie).
 
     nameBlockW[player] = cx - x;
     // Zone cliquable sur le bloc nom (ouvre l'overlay profil joueur)
@@ -4549,27 +5373,23 @@ function drawPlayerInfo() {
   function drawSessionScoreLandscape(player, sessionScore) {
     if (!diceOnSide) return;
     if (isLearnMode()) return;
-    const ds  = dieSize();
-    const die0 = getDiePos(player, 0);   // dé GAUCHE (le plus à gauche)
-    // Y du centre du bloc :
-    //   - white (joueur, bas) : AU-DESSUS du dé blanc → r entre arête haute
-    //     du dé (die.y) et arête basse du score → cy = die.y - r - SZ_BIG/2
-    //   - black (adversaire, haut) : SOUS le dé noir (config inversée) →
-    //     r entre arête basse du dé (die.y + ds) et arête haute du score
-    //     → cy = die.y + ds + r + SZ_BIG/2
-    const cy = (player === 'white')
-      ? die0.y - r - SZ_BIG / 2
-      : die0.y + ds + r + SZ_BIG / 2;
-    // Alignement gauche du texte sur l'arête gauche du dé de gauche
-    const xL = die0.x;
+    // Score (X) placé dans la colonne 1×4 des dés (cf. DXF "4 dés 2 scores").
+    // Cases 2 (joueur 'white') et 3 (adversaire 'black') au centre vertical
+    // de la colonne ; mêmes dimensions et espacement que les cellules dés
+    // (cellH = 3.5r + 1r). Centré horizontalement sur le centre de colonne.
+    // Cube + drapeau d'abandon ne sont PLUS rendus ici en paysage : ils sont
+    // placés dans la marge externe gauche (cf. drawLandscapeSideControls).
+    const ds        = dieSize();
+    const cellH     = ds + r;
+    const colCx     = bx - 2.75 * r;
+    const yBase     = by + 13*a - ds;             // top de la cellule la plus basse
+    const cellIndex = (player === 'white') ? 2 : 3;
+    const cy        = yBase - cellIndex * cellH + ds / 2; // centre vertical de la cellule
     const txt = `(${sessionScore})`;
     fill(C.ivory); noStroke();
     textFont(fontLarge); textSize(SZ_BIG);
-    textAlign(LEFT, CENTER);
-    text(txt, xL, cy);
-    // Cube + drapeau juste à droite du (X)
-    const txtW = textWidth(txt);
-    drawSessionGroup(player, xL + txtW, cy);
+    textAlign(CENTER, CENTER);
+    text(txt, colCx, cy);
     textAlign(LEFT, TOP);
   }
 
@@ -4585,20 +5405,19 @@ function drawPlayerInfo() {
     const die = getDiePos(player, 0);
     const dieCX = die.x + ds / 2;
     const txt = `(${sessionScore})`;
-    // On lit cyW/cyB depuis offGeomPortrait() pour GARANTIR que le (X) reste
-    // centré pile sur la rangée des pièces de bearing-off — toute évolution
-    // de la formule de positionnement reste centralisée à un seul endroit.
-    const G = offGeomPortrait();
-    const cy = (player === 'white') ? G.cyW : G.cyB;
-    // (X) reste CENTRÉ sur dieCX (position d'origine, pas décalé par
-    // l'ajout du cube/flag). Cube + flag sont juste positionnés à droite.
+    // Position rapprochée du board : score centré dans un carré imaginaire
+    // (de la même taille que les dés, ds × ds) ADJACENT au dé proche, avec
+    // un gap égal à la distance entre les 2 dés (= r*0.5).
+    //   - white (bas) : carré sous le dé blanc → cy = dieBot + dieGap + ds/2
+    //   - black (haut): carré au-dessus du dé noir → cy = dieTop - dieGap - ds/2
+    const dieGap = r * 0.5;
+    const cy = (player === 'white')
+      ? die.y + ds + dieGap + ds / 2
+      : die.y - dieGap - ds / 2;
     fill(C.ivory); noStroke();
     textFont(fontLarge); textSize(SZ_BIG);
     textAlign(CENTER, CENTER);
     text(txt, dieCX, cy);
-    // Cube + flag juste à droite du (X) — sans décaler le (X) de sa position.
-    const txtW = textWidth(txt);
-    drawSessionGroup(player, dieCX + txtW / 2, cy);
     textAlign(LEFT, TOP);
   }
 
@@ -4609,9 +5428,11 @@ function drawPlayerInfo() {
   nameBtns  = { white: null, black: null };
 
   if (diceOnSide) {
-    // ── Paysage : à r/2 à droite de la ligne latérale droite du plateau ──
-    // ↪▯ exit déplacé en bas-droite (drawExitButton). Drapeau sur la 2e ligne (drawSecondLine).
-    const x = bx + 13*a + r/2;
+    // ── Paysage : aligné sur la pip-bar (1r à droite du bord droit du
+    // plateau, distance symétrique à celle des dés côté gauche).
+    // ↪▯ exit géré par drawLandscapeSideControls (marge gauche).
+    // Drapeau idem.
+    const x = bx + 13*a + r;
     // Black (haut) : top à by
     drawNameLeft(baseB, sB, x, by, 'black');
     drawSecondLine(x, by + szN_for('black') + gap, pipB, 'black');
@@ -4640,7 +5461,7 @@ function drawPlayerInfo() {
     drawSecondLine(tx, yWhiteTop + szN_for('white') + gap, pipW, 'white');
     drawNameAccessories(tx, yBlackTop, szN_for('black'), 'black');
     drawNameAccessories(tx, yWhiteTop, szN_for('white'), 'white');
-    // Score session (X) déplacé près du dé gauche en portrait :
+    // Score session (X) placé près du dé gauche en portrait :
     // black au-dessus du dé haut, white sous le dé bas.
     drawSessionScoreNearDie('black', sB);
     drawSessionScoreNearDie('white', sW);
@@ -4690,18 +5511,33 @@ function drawDoublingCube(cx, cy, rad, player, isCurrentTurn) {
 
 // ── Info scénario ─────────────────────────────────────────────────────────────
 function drawInfo() {
-  textSize(12);
-  textAlign(LEFT, TOP);
-  noStroke();
-  fill(C.ivory);
-  const name = gameMode ? 'GAME' : (Object.keys(SCENARIOS).find(k => SCENARIOS[k] === mockState) || '?');
-  text(`[${name}${aiMode ? '+AI' : ''}] tour: ${mockState.turn}  dés: [${mockState.dice}]  fond: ${currentFond}${mirrorMode ? '  [MIRROR]' : ''}  — [1][2][3][4]  [5]=jeu réel  [i]=vs IA  [b]=test barre  [m]=nouvelle partie`, 6, 4);
+  // Barre d'info dev (scénario, tour, dés, fond, raccourcis) — désactivée
+  // pour libérer la zone supérieure du canvas (gagne ~16 px). Réactivable
+  // pour le debug en décommentant les lignes ci-dessous.
+  // textSize(12);
+  // textAlign(LEFT, TOP);
+  // noStroke();
+  // fill(C.ivory);
+  // const name = gameMode ? 'GAME' : (Object.keys(SCENARIOS).find(k => SCENARIOS[k] === mockState) || '?');
+  // text(`[${name}${aiMode ? '+AI' : ''}] tour: ${mockState.turn}  dés: [${mockState.dice}]  fond: ${currentFond}${mirrorMode ? '  [MIRROR]' : ''}  — [1][2][3][4]  [5]=jeu réel  [i]=vs IA  [b]=test barre  [m]=nouvelle partie`, 6, 4);
 }
 
 // ── Touch (délègue aux handlers souris, return false bloque scroll/zoom) ─────
-function touchStarted() {
+// Sur iOS Safari, p5.js attache ses listeners au document, donc taper sur un
+// <input> HTML overlay déclenche aussi touchStarted/touchEnded. Si on
+// `return false` dans ces handlers, iOS interprète ça comme un preventDefault
+// global → le focus n'est PAS donné à l'input et le clavier ne s'ouvre pas.
+// Solution : en sortie précoce, détecter event.target = INPUT et laisser le
+// comportement par défaut (return undefined, pas false).
+function _touchOnInput(event) {
+  return event && event.target && event.target.tagName === 'INPUT';
+}
+function touchStarted(event) {
+  if (_touchOnInput(event)) return;   // laisser iOS focuser l'input
   _hasTouched = true;
   _profileOpenedAtTouch = false;
+  _didScroll = false;
+  _scrollAccum = 0;
   if (profileOverlay) {
     // Si le doigt commence dans la zone du graphique → mode 'graph' (tooltip,
     // pas de scroll). Sinon → mode 'scroll' du tableau. Le mode est verrouillé
@@ -4726,10 +5562,17 @@ function touchStarted() {
   if (!wasOpen && profileOverlay) _profileOpenedAtTouch = true;
   return false;
 }
-function touchMoved() {
+function touchMoved(event) {
+  if (_touchOnInput(event)) return;
   if (profileOverlay) {
     if (_touchMode === 'scroll' && _scrollTouchY !== null) {
-      recentGamesScroll = Math.max(0, recentGamesScroll - (mouseY - _scrollTouchY));
+      const dy = mouseY - _scrollTouchY;
+      // Accumulation absolue : capte aussi les scrolls lents où chaque frame
+      // bouge < seuil mais le total dépasse — bascule _didScroll dès 4 px
+      // cumulés.
+      _scrollAccum += Math.abs(dy);
+      if (_scrollAccum > 4) _didScroll = true;
+      recentGamesScroll = Math.max(0, recentGamesScroll - dy);
       _scrollTouchY = mouseY;
     }
     // En mode 'graph' : mouseX/mouseY suivent le doigt, le tooltip s'affiche
@@ -4738,18 +5581,27 @@ function touchMoved() {
   }
   mouseDragged(); return false;
 }
-function touchEnded() {
+function touchEnded(event) {
+  if (_touchOnInput(event)) return;
   if (profileOverlay) {
-    const wasGraph   = _touchMode === 'graph';
-    const movedScroll = _touchMode === 'scroll' && _scrollTouchY !== null
-                     && Math.abs(mouseY - _scrollTouchY) > 4;
-    const justOpened = _profileOpenedAtTouch;
+    const wasGraph    = _touchMode === 'graph';
+    // BUG corrigé : on ne peut PAS comparer mouseY à _scrollTouchY au moment du
+    // touchEnded, car _scrollTouchY est mis à jour en continu dans touchMoved
+    // → les deux valeurs coïncident et movedScroll renvoyait toujours false,
+    // d'où la fermeture inopinée de l'overlay quand l'utilisateur relâchait
+    // son doigt entre deux scrolls. On s'appuie maintenant sur _didScroll,
+    // armé dans touchMoved dès qu'un mouvement > 4 px est observé sur l'axe Y.
+    const movedScroll = _didScroll;
+    const justOpened  = _profileOpenedAtTouch;
     _touchMode    = null;
     _scrollTouchY = null;
+    _didScroll    = false;
+    _scrollAccum  = 0;
     _profileOpenedAtTouch = false;
     // Tap sans mouvement notable, hors graphique, et qui n'a pas servi à OUVRIR
     // l'overlay → traité comme un clic (close, signout ou EXIT). Sinon on ne
-    // fait rien (sinon on fermerait l'overlay aussitôt après l'avoir ouvert).
+    // fait rien (sinon on fermerait l'overlay aussitôt après l'avoir ouvert,
+    // ou aussitôt après un scroll).
     if (!wasGraph && !movedScroll && !justOpened) { mousePressed(); }
     return false;
   }
