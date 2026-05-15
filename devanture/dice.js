@@ -35,15 +35,35 @@ let diceAnim = { state:DS.EMPTY, owner:'white', frame:0, values:[0,0], dice:[nul
 function dieSize() { return 3.5 * r; }
 
 function getDiePos(player, dieIdx) {
-  const ds = dieSize();   // 3r = 1.5a
+  const ds = dieSize();   // 3.5r = 1.75a
 
   if (diceOnSide) {
-    // Dés à gauche — gap r/2 entre plateau et dé droit, gap r/2 entre les deux dés
-    const xRight = bx - r/2;   // bord droit du dé 1 (gap r/2 depuis le plateau)
-    const x = xRight - (2 - dieIdx) * ds - (1 - dieIdx) * r * 0.5;
-    return player === 'white'
-      ? { x, y: by + 13*a - ds }   // base basse alignée sur ligne inférieure du plateau
-      : { x, y: by };              // base haute alignée sur ligne supérieure du plateau
+    // Colonne unique 1×4 à gauche du plateau (cf. DXF "4 dés 2 scores").
+    // 6 cellules de 3.5r × 3.5r empilées verticalement, espacement 1r,
+    // hauteur totale 6×3.5r + 5×1r = 26r = 13a (aligne avec le plateau).
+    // De BAS en HAUT :
+    //   case 0 — dé joueur (touche bord inf du plateau)
+    //   case 1 — dé joueur (au-dessus)
+    //   case 2 — score joueur (0)        ← non dessiné ici (drawPlayerInfo)
+    //   case 3 — score adv   (0)         ← idem
+    //   case 4 — dé adv (au-dessous du dé adv haut)
+    //   case 5 — dé adv (touche bord sup du plateau)
+    // Centre de la colonne à bx - 2.75r (= 16.5 DXF unités à gauche du
+    // bord gauche du plateau, board commence à bx).
+    const cx    = bx - 2.75 * r;
+    const x     = cx - ds / 2;        // bord gauche du carré
+    const cellH = ds + r;             // 3.5r + 1r = 4.5r
+    const yBase = by + 13*a - ds;     // top du carré le plus bas (case 0)
+    // Mappage dieIdx → cellule : on garde idx=1 = extrémité (touche bord),
+    // idx=0 = vers le centre, cohérent avec le sens "premier dé près du
+    // score, second dé contre le bord" du briefing utilisateur.
+    let cellIndex;
+    if (player === 'white') {
+      cellIndex = (dieIdx === 1) ? 0 : 1;     // idx=1 → case 0 (bord), idx=0 → case 1
+    } else {
+      cellIndex = (dieIdx === 1) ? 5 : 4;     // idx=1 → case 5 (bord), idx=0 → case 4
+    }
+    return { x, y: yBase - cellIndex * cellH };
   } else {
     // Dés au-dessus / en-dessous — alignés sur bx, gap r/2 entre dé et plateau
     const x = bx + dieIdx * (ds + r * 0.5);

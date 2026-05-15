@@ -160,6 +160,50 @@ The `devanture/` p5.js skin is a visual prototype that's now feature-complete en
 
 ---
 
+## Backgammon Game Modes — Tournament-Standard Rules (Deferred)
+
+Notes after cross-checking the current implementation against
+[backgammongalaxy.com/how-to-play-backgammon](https://www.backgammongalaxy.com/how-to-play-backgammon).
+The core rules (setup, direction, opening roll, doubles, hitting, bar, bearing
+off with overshoot, forced max moves + biggest die, gammon/backgammon scoring)
+are already correct. The items below are the **simplified variants** in our
+code that should converge to the tournament standard in a future iteration.
+
+### Tasks
+
+- [ ] **Doubling cube full range (1→2→4→8→16→32→64)** - Currently capped at
+      `cubeValue >= 4`. Standard allows 64. Remove the cap and let the cube
+      double indefinitely; refusal still ends the game and pays the current
+      face value to the offerer.
+- [ ] **Cube ownership via `cubeOwner` (no per-player cap)** - Current
+      variant: each player can double at most once (`cubeUsed[player]`). The
+      tournament rule is "only the cube owner can offer next", tracked by
+      `cubeOwner`. Switch the guard from `cubeUsed` to "is current player the
+      owner OR is the cube centered (no owner yet)?".
+- [ ] **Explicit "before rolling" check on `clickCube()`** - Currently the
+      click is accepted at any time and effect is deferred to next turn
+      via `cubePromised`. Behaviourally equivalent in most cases but should
+      be tightened to reject clicks during dice animation / mid-turn for
+      clarity.
+- [ ] **Match play with point target** - Predetermined target (1, 3, 5, 7,
+      11, 17, 25…). Cumulative `gameScore` across games until someone hits
+      the target; reset between matches. Show `score / target` in the UI.
+- [ ] **Crawford rule** - When one player is exactly 1 point from victory,
+      the doubling cube is disabled for the very next game only. Track
+      `crawfordGameDone` per match.
+- [ ] **Jacoby rule (money games)** - Gammons / backgammons count as
+      ×2 / ×3 ONLY if the cube has been turned at least once during the
+      game. If still at 1 (untouched cube), even a gammon scores 1 point.
+      Track `cubeTurned` per game; multiply by 1 instead of `winPoints(type)`
+      when Jacoby is on AND `cubeTurned` is false. Toggle per match settings.
+- [ ] **Beaver / Raccoon (optional money-game variant)** - On a double
+      offer, the receiver can not only accept/decline but also "beaver"
+      (re-double immediately while keeping the cube). Raccoon = the original
+      offerer re-doubles after a beaver. Niche; only relevant if we ship
+      money games seriously.
+
+---
+
 ## How to Use This Plan
 
 When starting a session with Claude Code:
