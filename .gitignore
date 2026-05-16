@@ -6,6 +6,11 @@ dist/
 *.log
 .DS_Store
 
+# Note: devanture/firebase-config.js IS committed on purpose. The Firebase
+# web API key is public by design (it ends up in any client JS bundle anyway)
+# and the skin is served as static files without a build step that could
+# inject env vars. Real security lives in the Realtime Database Rules.
+
 screenshots/
 
 WIP.md
