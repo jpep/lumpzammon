@@ -136,6 +136,21 @@ The current AI is a single-step greedy evaluator. It works but is beatable.
 
 ---
 
+## Phase 7.5: Devanture Skin — Firebase Wiring (in progress)
+
+Avant l'intégration React de la Phase 8, on branche la skin standalone sur Firebase (projet `gmmn-afd53`, Realtime Database, Europe-west1) afin de remplacer les `PLAYER_PROFILES` mockés par des stats réelles persistées. La skin reste 100% standalone (chargement compat scripts, pas de bundler).
+
+### Tasks
+
+- [x] **Infrastructure SDK** — chargement Firebase compat (app/auth/database) dans `devanture/index.html`, init dans `devanture/firebase.js`, config publique commitée dans `devanture/firebase-config.js` (template `firebase-config.example.js`).
+- [x] **Auth anonyme** — `signInAnonymously()` au boot, UID stable persisté par le SDK. Migration vers email/password à la Phase 8 quand le sign-in UI sera remplacé par `MenuScreen`.
+- [ ] **Stats writes** — brancher `recordGameToProfile()` (`devanture/adapter.js`) sur `Devanture.firebase.appendGame(nick, gameResult)` à chaque fin de partie (tous types : normale, resign, forfait timer, quit-to-room).
+- [ ] **Profile reads** — au démarrage, charger `PLAYER_PROFILES[white]` depuis Firebase (`ensurePlayer(nick)`). Adversaire AI reste mock. Adversaire humain (online mode futur) lu pareil.
+- [ ] **Authorized domains** — ajouter `jpep.github.io` dans Firebase Auth → Settings → Authorized domains pour autoriser l'auth anonyme depuis la prod.
+- [ ] **Database Rules** — durcir les règles après stabilisation du schéma `/players/<nick>/*` (passer du test-mode ouvert à `auth != null` minimum).
+
+---
+
 ## Phase 8: Devanture Skin → React Integration (next PR)
 
 The `devanture/` p5.js skin is a visual prototype that's now feature-complete enough to merge back into the React app. Each item below maps a skin feature to the React components/hooks that will need to be added or modified.

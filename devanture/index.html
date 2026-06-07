@@ -70,6 +70,17 @@
 </head>
 <body>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.4/p5.min.js"></script>
+  <!-- Firebase SDK (compat scripts pour usage non-bundlé) :
+       - app    : initializeApp
+       - auth   : signInAnonymously, currentUser
+       - database : RTDB ref/once/on/set
+       Si firebase-config.js est absent (clone sans setup local), firebase.js
+       loggue une erreur et le reste de la skin tourne en mode mock. -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-database-compat.js"></script>
+  <script src="firebase-config.js?v=223"></script>
+  <script src="firebase.js?v=223"></script>
   <script src="mockState.js?v=222"></script>
   <script src="game/logic_standalone.js?v=222"></script>
   <script src="game/ai_standalone.js?v=222"></script>

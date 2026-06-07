@@ -285,8 +285,44 @@ devanture/
 │   └── ai_standalone.js        # placeholder AI (not used yet)
 ├── fonts/                      # nortechico OTF (heading + small)
 ├── fond.jpg / fond0…fond6.jpg  # background pool, randomised per match
+├── firebase.js                 # init + signInAnonymously + getPlayer/appendGame helpers
+├── firebase-config.js          # FIREBASE_CONFIG (committed, web API key is public)
+├── firebase-config.example.js  # template for replicating the skin elsewhere
 └── serve.py                    # dev server with no-cache headers (one level up)
 ```
+
+### Firebase wiring (Phase 7.5 — in progress)
+
+The skin uses Firebase Realtime Database (project `gmmn-afd53`, region `europe-west1`) for player stats. Because the skin is served as static files (no Vite/Webpack build step), Firebase is loaded via compat CDN scripts and the config is committed directly in `devanture/firebase-config.js` (Firebase web API keys are public by design — the React app's prod bundle exposes them too, and real security lives in Database Rules + Auth).
+
+Anonymous Auth is enabled at startup; the resulting UID is a stable per-browser identity. The schema lives under `/players/<sanitized_nick>` :
+
+```
+/players/<nick>
+  firstPlay:    ISO timestamp
+  totalGames:   number
+  wins:         number
+  winPercent:   number (0..1)
+  recentGames:  [ { youScore, oppScore, opponent, delta, playedAt }, … ]   # capped at 50
+  scoreHistory: [ { date: YYYY-MM-DD, score: cumulative }, … ]
+```
+
+API exposed on `window.Devanture.firebase`:
+- `init()` — call once at boot (idempotent)
+- `getPlayer(nick)` — read profile or `null`
+- `ensurePlayer(nick)` — read profile, create empty one if missing
+- `appendGame(nick, gameResult)` — atomic-ish update on game end
+
+For local dev, `localhost` is whitelisted by Firebase Auth out of the box. For the GitHub Pages deploy at `https://jpep.github.io/lumpzammon/devanture/`, the domain `jpep.github.io` must be added to Firebase Auth → Settings → Authorized domains.
+
+#### ⚠️ Required manual setup (Firebase Console — one-time)
+
+Anonymous auth **will fail in production** until these are done by hand in the
+[Firebase Console](https://console.firebase.google.com/project/gmmn-afd53) (project `gmmn-afd53`). The code cannot do this for you:
+
+- [ ] **Authorized domains** — add `jpep.github.io` under **Authentication → Settings → Authorized domains**. Without it, `signInAnonymously()` throws `auth/unauthorized-domain` on the GitHub Pages deploy (only `localhost` works out of the box). **Owner:** repo maintainer (@jpep) · **When:** before/at merge of the Firebase write-path PR.
+- [x] Realtime Database created (`gmmn-afd53`, europe-west1)
+- [x] Anonymous Auth provider enabled
 
 ### Keyboard
 
