@@ -15,8 +15,9 @@ screenshots/
 
 WIP.md
 
-# Local Claude Code config (per-user, not for repo)
-.claude/
+# Local Claude Code config (per-user, not for repo) — but DO track shared skills
+.claude/*
+!.claude/skills/
 
 # Stray reference copies (the live assets live in devanture/)
 /fond.jpg

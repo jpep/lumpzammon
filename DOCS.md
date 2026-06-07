@@ -217,6 +217,36 @@ Live URL: https://jpep.github.io/lumpzammon/
   - **GitHub Pages**: injected via repository secrets during the Actions build step
   - Firebase project: `lumpzammon` (Spark/free plan, Realtime Database)
 
+### Browser verification (Playwright)
+
+How to drive the **running** app in a real browser to confirm a UI/gameplay change (local/AI or online) — and the gotchas that cost time the first time, so the next run starts clean. (The `.claude/skills/verifier-browser` skill mirrors this so `/verify` auto-uses it; this section is the human-readable copy.)
+
+**Run recipe** — Playwright in the official Docker image (no host `npm` per project rules); the dev server must be up (`docker compose --profile dev up -d dev`):
+
+```bash
+mkdir -p .verify && cd .verify        # throwaway scratch; clean up after
+# write your driver, e.g. verify.mjs (import { chromium } from 'playwright')
+docker run --rm --network host \
+  -v "$(pwd)":/work -w /work \
+  mcr.microsoft.com/playwright:v1.49.0-jammy \
+  bash -lc "npm init -y >/dev/null 2>&1 && npm i playwright@1.49.0 --no-save --silent && node verify.mjs"
+```
+
+- The **image tag must match the `playwright@` version** (`v1.49.0-jammy` ↔ `playwright@1.49.0`); browsers are prebundled in the image.
+- **Clean up the scratch via Docker** (npm ran as root → host `rm` hits permission denied):
+  `docker run --rm -v "$(pwd)":/w -w /w node:20-alpine rm -rf .verify`
+
+**Gotchas (with the fix):**
+
+1. **Vite blocks non-`localhost` Host headers** (`server.allowedHosts`). Reaching the dev container as `http://dev:5173` shows *"Blocked request. This host (dev) is not allowed."* → run the container with `--network host` and use `http://localhost:5173/lumpzammon/` (Host `localhost` is allowed). Alternatively add the host to `server.allowedHosts` in `vite.config.js`.
+2. **Every top checker has `cursor:pointer`** (the click handler is always wired), so cursor is *not* a "movable" signal. Detect **movable** checkers by their glow box-shadow: `getComputedStyle(c).boxShadow.includes('0px 0px')` (normal checkers are `0px 2px …`).
+3. **Checkers sit at the point's edge, not its center** (points are 42×200, checkers stack from the top/bottom edge). A default center-click misses them → click the checker by its **bounding-box coords** (`el.getBoundingClientRect()` → `page.mouse.click(cx, cy)`), not the `[data-point-id]` element.
+4. **Move targets** are detectable on the point div: `[data-point-id]`'s own `cursor` is `pointer` only when it's a highlighted destination, so clicking the point-div center is fine for targets. A checker with exactly **one** legal move executes on the checker click; with several it sets `selectedFrom` and targets highlight (then click one).
+5. **Online has no optimistic local update** — moves round-trip through Firebase (`updateMatch` write → `sSubscribe` echo). Don't expect the acting client's board to change instantly; **poll both clients (~up to 8s)** for the change.
+6. **Two-client online test**: two separate `browser.newContext()` (separate storage = two nicks). Host → Online → **Create Match** → "Waiting"; joiner → Online → lobby lists *"host's game"* → **Join** (target the Join button **by role**, not brittle XPath). Cleanup = click **Leave Game** on each (calls `leaveMatch` → deletes the `bg:match:`/`bg:lobby:` entries from the live Firebase DB). Opening: each client clicks **"Roll for first move"**, handle ties (buttons reappear), then proceed once both roll buttons are gone and one side has movable checkers.
+
+**Handy selectors / signals:** menu `input[placeholder="Enter your nickname"]` + `button:has-text("Play")`; modes `button:has-text("Local (2 Players)"|"vs Computer"|"Online")`; board points `[data-point-id="0".."23"]`, bear-off `[data-point-id="off-1"|"off-2"]`; **board signature** to detect any move = count of `36px` `border-radius:50%` divs per `[data-point-id]`; storage keys `bg:nick` / `bg:session:<nick>` / `bg:localGame:<nick>` / `bg:match:<id>` / `bg:lobby:<id>` (all from `app/src/game/constants.js`).
+
 ## Alternating Board Direction
 
 The board direction alternates each new game, like flipping seats at a real backgammon table. A `direction` state (0 or 1) in `GameScreen.jsx` toggles on "New Game". `getBoardIndices(dir)` in `logic.js` returns flipped index arrays, and `Board.jsx` conditionally places bear-off zones on the left or right side accordingly. Game logic is unchanged — only the visual mapping of indices to screen positions changes. The flip is a full 180° rotation: top/bottom halves swap, left/right swap, and each player's bar and bear-off zone move to the correct half. Bear-off zones display a "home" label highlighted for the current player. In online mode, direction is derived from `playerSlot` — each player sees their own home on the bottom half of the screen, like sitting across a real table.
