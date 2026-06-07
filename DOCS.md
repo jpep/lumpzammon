@@ -315,14 +315,25 @@ API exposed on `window.Devanture.firebase`:
 
 For local dev, `localhost` is whitelisted by Firebase Auth out of the box. For the GitHub Pages deploy at `https://jpep.github.io/lumpzammon/devanture/`, the domain `jpep.github.io` must be added to Firebase Auth → Settings → Authorized domains.
 
-#### ⚠️ Required manual setup (Firebase Console — one-time)
+#### Firebase Console setup (status — verified 2026-06-07)
 
-Anonymous auth **will fail in production** until these are done by hand in the
-[Firebase Console](https://console.firebase.google.com/project/gmmn-afd53) (project `gmmn-afd53`). The code cannot do this for you:
+Checked against the live project config (`gmmn-afd53`):
 
-- [ ] **Authorized domains** — add `jpep.github.io` under **Authentication → Settings → Authorized domains**. Without it, `signInAnonymously()` throws `auth/unauthorized-domain` on the GitHub Pages deploy (only `localhost` works out of the box). **Owner:** repo maintainer (@jpep) · **When:** before/at merge of the Firebase write-path PR.
 - [x] Realtime Database created (`gmmn-afd53`, europe-west1)
 - [x] Anonymous Auth provider enabled
+- [x] **Authorized domains** already include `jpep.github.io` (alongside `localhost`, `gmmn-afd53.firebaseapp.com`, `gmmn-afd53.web.app`). Prod anon auth was verified live: `signInAnonymously()` returns a uid from `https://jpep.github.io/lumpzammon/devanture/`.
+
+> **When do Authorized domains actually matter?** This list only gates OAuth
+> redirect/popup providers (Google, etc.) and email-link (passwordless)
+> sign-in — flows that bounce through `authDomain`. Per Firebase's documented
+> behaviour it does **not** affect `signInAnonymously()` or plain
+> email/password sign-in, which call the Identity Toolkit REST API directly
+> regardless of origin. So no domain entry is required for the current
+> anonymous path (and `jpep.github.io` is present anyway). Only revisit this if
+> Phase 8 adds an OAuth provider or email-link sign-in.
+>
+> You can read the current list with the public web API key (no auth):
+> `curl "https://identitytoolkit.googleapis.com/v1/projects?key=<apiKey>"`.
 
 ### Keyboard
 

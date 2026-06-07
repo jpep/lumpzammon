@@ -146,7 +146,7 @@ Avant l'intégration React de la Phase 8, on branche la skin standalone sur Fire
 - [x] **Auth anonyme** — `signInAnonymously()` au boot, UID stable persisté par le SDK. Migration vers email/password à la Phase 8 quand le sign-in UI sera remplacé par `MenuScreen`.
 - [ ] **Stats writes** — brancher `recordGameToProfile()` (`devanture/adapter.js`) sur `Devanture.firebase.appendGame(nick, gameResult)` à chaque fin de partie (tous types : normale, resign, forfait timer, quit-to-room).
 - [ ] **Profile reads** — au démarrage, charger `PLAYER_PROFILES[white]` depuis Firebase (`ensurePlayer(nick)`). Adversaire AI reste mock. Adversaire humain (online mode futur) lu pareil.
-- [ ] **Authorized domains** — ajouter `jpep.github.io` dans Firebase Auth → Settings → Authorized domains pour autoriser l'auth anonyme depuis la prod.
+- [x] **Authorized domains** — `jpep.github.io` est déjà présent dans Firebase Auth → Settings → Authorized domains (vérifié le 2026-06-07 via l'API publique + auth anonyme live en prod). N.B. : la liste Authorized domains ne concerne que les flux OAuth redirect/popup et email-link, **pas** l'auth anonyme ni email/password (qui passent par l'API REST Identity Toolkit sans contrôle d'origine). À revisiter uniquement si la Phase 8 introduit un provider OAuth ou un sign-in par lien email.
 - [ ] **Database Rules** — durcir les règles après stabilisation du schéma `/players/<nick>/*` (passer du test-mode ouvert à `auth != null` minimum).
 
 ---
