@@ -315,6 +315,15 @@ API exposed on `window.Devanture.firebase`:
 
 For local dev, `localhost` is whitelisted by Firebase Auth out of the box. For the GitHub Pages deploy at `https://jpep.github.io/lumpzammon/devanture/`, the domain `jpep.github.io` must be added to Firebase Auth → Settings → Authorized domains.
 
+#### ⚠️ Required manual setup (Firebase Console — one-time)
+
+Anonymous auth **will fail in production** until these are done by hand in the
+[Firebase Console](https://console.firebase.google.com/project/gmmn-afd53) (project `gmmn-afd53`). The code cannot do this for you:
+
+- [ ] **Authorized domains** — add `jpep.github.io` under **Authentication → Settings → Authorized domains**. Without it, `signInAnonymously()` throws `auth/unauthorized-domain` on the GitHub Pages deploy (only `localhost` works out of the box). **Owner:** repo maintainer (@jpep) · **When:** before/at merge of the Firebase write-path PR.
+- [x] Realtime Database created (`gmmn-afd53`, europe-west1)
+- [x] Anonymous Auth provider enabled
+
 ### Keyboard
 
 | Key | Action |
