@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { sList, sGet, sDel } from '../storage';
+import { KEY_MATCH, KEY_LOBBY } from '../game/constants';
 import { useTheme } from '../ThemeContext';
 
 export default function AdminPanel({ onClose }) {
@@ -11,8 +12,8 @@ export default function AdminPanel({ onClose }) {
   useEffect(() => {
     (async () => {
       const [matchKeys, lobbyKeys] = await Promise.all([
-        sList('bg:match:'),
-        sList('bg:lobby:'),
+        sList(KEY_MATCH),
+        sList(KEY_LOBBY),
       ]);
       const matchData = await Promise.all(
         matchKeys.map(async (key) => {

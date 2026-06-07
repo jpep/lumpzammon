@@ -4,7 +4,9 @@
 // different nicks (e.g. testing online mode against yourself) don't
 // clash. The nick itself uses a fixed key (last nick entered).
 
-const NICK_KEY = 'bg:nick';
+import { KEY_NICK, KEY_SESSION, KEY_LOCAL_GAME } from '../game/constants';
+
+const NICK_KEY = KEY_NICK;
 
 // Current nick used to scope other keys. Set by the app on login.
 let _currentNick = '';
@@ -14,11 +16,11 @@ export function setCurrentNick(nick) {
 }
 
 function sessionKey() {
-  return _currentNick ? `bg:session:${_currentNick}` : 'bg:session';
+  return _currentNick ? `${KEY_SESSION}${_currentNick}` : 'bg:session';
 }
 
 function localGameKey() {
-  return _currentNick ? `bg:localGame:${_currentNick}` : 'bg:localGame';
+  return _currentNick ? `${KEY_LOCAL_GAME}${_currentNick}` : 'bg:localGame';
 }
 
 // Nick uses sessionStorage (per-tab) so two tabs can hold different nicks,

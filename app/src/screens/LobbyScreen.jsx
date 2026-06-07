@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { sList, sGet } from '../storage';
+import { KEY_LOBBY } from '../game/constants';
 import { useTheme } from '../ThemeContext';
 
 export default function LobbyScreen({ nick, onCreateMatch, onJoinMatch, onBack }) {
@@ -9,7 +10,7 @@ export default function LobbyScreen({ nick, onCreateMatch, onJoinMatch, onBack }
   const theme = useTheme();
 
   const refresh = async () => {
-    const keys = await sList('bg:lobby:');
+    const keys = await sList(KEY_LOBBY);
     const results = [];
     for (const key of keys) {
       const data = await sGet(key);

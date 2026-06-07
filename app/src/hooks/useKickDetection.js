@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { sGet } from '../storage';
+import { KEY_MATCH } from '../game/constants';
 
 export default function useKickDetection(matchId, playerSlot) {
   const [kicked, setKicked] = useState(false);
@@ -14,7 +15,7 @@ export default function useKickDetection(matchId, playerSlot) {
     if (!matchId || !playerSlot) return;
 
     intervalRef.current = setInterval(async () => {
-      const data = await sGet(`bg:match:${matchId}`);
+      const data = await sGet(`${KEY_MATCH}${matchId}`);
       if (!data) {
         setKicked(true);
         clearInterval(intervalRef.current);

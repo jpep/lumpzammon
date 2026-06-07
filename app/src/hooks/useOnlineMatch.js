@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { sGet, sSet, sDel, sList, sSubscribe } from '../storage';
 import { newGameState, clone } from '../game/logic';
+import { KEY_MATCH, KEY_LOBBY } from '../game/constants';
 import { saveSession, clearSession } from '../storage/local';
 
 export default function useOnlineMatch(nick) {
@@ -17,8 +18,8 @@ export default function useOnlineMatch(nick) {
       state: newGameState(),
       created: Date.now(),
     };
-    await sSet(`bg:match:${id}`, data);
-    await sSet(`bg:lobby:${id}`, { id, host: nick, created: Date.now() });
+    await sSet(`${KEY_MATCH}${id}`, data);
+    await sSet(`${KEY_LOBBY}${id}`, { id, host: nick, created: Date.now() });
     setMatchId(id);
     setPlayerSlot(1);
     setMatchData(data);
@@ -27,11 +28,11 @@ export default function useOnlineMatch(nick) {
   }, [nick]);
 
   const joinMatch = useCallback(async (id) => {
-    const data = await sGet(`bg:match:${id}`);
+    const data = await sGet(`${KEY_MATCH}${id}`);
     if (!data || data.players[2]) return false;
     data.players[2] = nick;
-    await sSet(`bg:match:${id}`, data);
-    await sDel(`bg:lobby:${id}`);
+    await sSet(`${KEY_MATCH}${id}`, data);
+    await sDel(`${KEY_LOBBY}${id}`);
     setMatchId(id);
     setPlayerSlot(2);
     setMatchData(data);
@@ -42,7 +43,7 @@ export default function useOnlineMatch(nick) {
   // Reconnect to an existing match without modifying DB data.
   // Returns true if match still exists and player belongs to it.
   const reconnectMatch = useCallback(async (id, slot) => {
-    const data = await sGet(`bg:match:${id}`);
+    const data = await sGet(`${KEY_MATCH}${id}`);
     if (!data) {
       clearSession();
       return false;
@@ -61,15 +62,15 @@ export default function useOnlineMatch(nick) {
 
   const updateMatch = useCallback(async (newState) => {
     if (!matchId) return;
-    const data = await sGet(`bg:match:${matchId}`);
+    const data = await sGet(`${KEY_MATCH}${matchId}`);
     if (!data) return;
     data.state = newState;
-    await sSet(`bg:match:${matchId}`, data);
+    await sSet(`${KEY_MATCH}${matchId}`, data);
   }, [matchId]);
 
   useEffect(() => {
     if (!matchId) return;
-    unsubRef.current = sSubscribe(`bg:match:${matchId}`, (data) => {
+    unsubRef.current = sSubscribe(`${KEY_MATCH}${matchId}`, (data) => {
       if (data) setMatchData(data);
     });
     return () => {
@@ -79,8 +80,8 @@ export default function useOnlineMatch(nick) {
 
   const leaveMatch = useCallback(async () => {
     if (matchId) {
-      await sDel(`bg:match:${matchId}`);
-      await sDel(`bg:lobby:${matchId}`);
+      await sDel(`${KEY_MATCH}${matchId}`);
+      await sDel(`${KEY_LOBBY}${matchId}`);
     }
     if (unsubRef.current) unsubRef.current();
     setMatchId(null);
