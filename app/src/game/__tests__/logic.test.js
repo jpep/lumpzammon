@@ -3,13 +3,12 @@ import {
   P1, P2,
   initialBoard, newGameState,
   resolveOpening, canLand, allHome, pipDist, calcPipCount, farthestHome,
-  getValidMoves, applyMove, checkWin,
+  getValidMoves, getValidMovesRaw, maxDiceSequence, applyMove, checkWin,
 } from '../logic.js';
 
-// These tests pin the ORIGINAL engine behaviour. In Phase 8.1 the current
-// getValidMoves becomes getValidMovesRaw (a rules-filtered getValidMoves is
-// layered on top); the "raw move" assertions below will move to getValidMovesRaw
-// and dedicated filtered-move tests will be added.
+// Raw-move assertions test getValidMovesRaw (the original generator). The
+// mandatory-move rule (must use max dice; force the larger die) is tested
+// separately against getValidMoves.
 
 const emptyPts = () => Array.from({ length: 24 }, () => ({ n: 0, p: 0 }));
 
@@ -109,11 +108,11 @@ describe('landing & home helpers', () => {
   });
 });
 
-describe('getValidMoves (raw, original behaviour)', () => {
+describe('getValidMovesRaw (raw legal moves, no mandatory-move rule)', () => {
   it('bar-first: only bar re-entry while a checker is on the bar; blocked entries excluded', () => {
     const s = st({ moves: [2, 4], bar: { 1: 1, 2: 0 } });
     s.pts[20] = { n: 2, p: 2 }; // blocks P1 entry for die 4 (24-4=20)
-    const mv = getValidMoves(s, P1);
+    const mv = getValidMovesRaw(s, P1);
     // die 2 -> 24-2=22 (open); die 4 -> 20 (blocked)
     expect(mv).toEqual([{ f: 'bar', t: 22, d: 2 }]);
   });
@@ -121,14 +120,9 @@ describe('getValidMoves (raw, original behaviour)', () => {
   it('returns BOTH single-die options even when only one die can ultimately be used', () => {
     // Larger-die scenario: from idx 8, both die 3 (->5) and die 5 (->3) are
     // individually playable, but neither sequence uses both (idx 0 blocked).
-    // RAW returns both; the Phase 8.1 mandatory rule will keep only the larger.
-    const s = st({ moves: [3, 5] });
-    s.pts[8] = { n: 1, p: 1 };
-    s.pts[23] = { n: 1, p: 1 };  // stuck (keeps allHome false); both its dice blocked
-    s.pts[0] = { n: 2, p: 2 };
-    s.pts[18] = { n: 2, p: 2 };
-    s.pts[20] = { n: 2, p: 2 };
-    const mv = getValidMoves(s, P1);
+    // RAW returns both; the mandatory rule (tested below) keeps only the larger.
+    const s = largerDiePosition();
+    const mv = getValidMovesRaw(s, P1);
     expect(mv).toHaveLength(2);
     expect(mv).toContainEqual({ f: 8, t: 5, d: 3 });
     expect(mv).toContainEqual({ f: 8, t: 3, d: 5 });
@@ -137,7 +131,7 @@ describe('getValidMoves (raw, original behaviour)', () => {
   it('bear-off: exact die bears off', () => {
     const s = st({ moves: [6] });
     s.pts[5] = { n: 1, p: 1 };
-    const mv = getValidMoves(s, P1);
+    const mv = getValidMovesRaw(s, P1);
     expect(mv).toEqual([{ f: 5, t: 'off', d: 6 }]);
   });
 
@@ -145,8 +139,94 @@ describe('getValidMoves (raw, original behaviour)', () => {
     const s = st({ moves: [6] });
     s.pts[3] = { n: 1, p: 1 };  // pipDist 4, is farthest -> may bear off with a 6
     s.pts[1] = { n: 1, p: 1 };  // pipDist 2, NOT farthest -> cannot overshoot
-    const mv = getValidMoves(s, P1);
+    const mv = getValidMovesRaw(s, P1);
     expect(mv).toEqual([{ f: 3, t: 'off', d: 6 }]);
+  });
+
+  it('P2 bar re-entry enters at t = d-1', () => {
+    const s = st({ moves: [3], bar: { 1: 0, 2: 1 }, turn: P2 });
+    expect(getValidMovesRaw(s, P2)).toEqual([{ f: 'bar', t: 2, d: 3 }]);
+  });
+});
+
+describe('bar re-entry edge cases', () => {
+  it('entering on an opponent blot sends it to the bar', () => {
+    const s = st({ moves: [3], bar: { 1: 1, 2: 0 } });
+    s.pts[21] = { n: 1, p: 2 }; // P1 enters at 24-3=21, opponent blot there
+    const ns = applyMove(s, P1, { f: 'bar', t: 21, d: 3 });
+    expect(ns.bar[1]).toBe(0);
+    expect(ns.bar[2]).toBe(1);
+    expect(ns.pts[21]).toEqual({ n: 1, p: 1 });
+  });
+
+  it('fully-blocked bar yields no legal moves (turn forfeit) under both generators', () => {
+    const s = st({ moves: [3, 5], bar: { 1: 1, 2: 0 } });
+    s.pts[21] = { n: 2, p: 2 }; // blocks entry for die 3 (24-3)
+    s.pts[19] = { n: 2, p: 2 }; // blocks entry for die 5 (24-5)
+    expect(getValidMovesRaw(s, P1)).toEqual([]);
+    expect(getValidMoves(s, P1)).toEqual([]);
+  });
+});
+
+// ── Shared fixtures for the mandatory-move rule ──────────────────────────────
+
+// Only ONE die is ever playable; the two dice differ. The larger (5) must win.
+function largerDiePosition() {
+  const s = st({ moves: [3, 5] });
+  s.pts[8] = { n: 1, p: 1 };   // die3 -> 5 (open), die5 -> 3 (open); both single-only
+  s.pts[23] = { n: 1, p: 1 };  // stuck (keeps allHome false); its dice are blocked
+  s.pts[0] = { n: 2, p: 2 };   // blocks the 2nd die after either first move
+  s.pts[18] = { n: 2, p: 2 };  // blocks stuck checker (23 -> 18)
+  s.pts[20] = { n: 2, p: 2 };  // blocks stuck checker (23 -> 20)
+  return s;
+}
+
+// Both dice CAN be used together, but one specific move (C: 4->1 with die3)
+// strands die2 and must be filtered out.
+function mustUseBothPosition() {
+  const s = st({ moves: [3, 2] });
+  s.pts[8] = { n: 1, p: 1 };  // A: die3 -> 5 (open); die2 -> 6 (blocked)
+  s.pts[4] = { n: 1, p: 1 };  // C: die3 -> 1 (open); die2 -> 2 (open)
+  s.pts[6] = { n: 2, p: 2 };  // blocks A's die2 and keeps continuations asymmetric
+  return s;
+}
+
+describe('getValidMoves (mandatory-move rule)', () => {
+  it('larger-die rule: when only one die is playable, it must be the larger', () => {
+    const s = largerDiePosition();
+    expect(maxDiceSequence(s, P1)).toBe(1);          // only one die ever usable
+    const mv = getValidMoves(s, P1);
+    expect(mv).toEqual([{ f: 8, t: 3, d: 5 }]);       // forced to the larger (5)
+  });
+
+  it('must use the maximum number of dice: drops a move that strands a die', () => {
+    const s = mustUseBothPosition();
+    expect(maxDiceSequence(s, P1)).toBe(2);           // both dice can be used
+    const raw = getValidMovesRaw(s, P1);
+    const mv = getValidMoves(s, P1);
+    expect(raw).toHaveLength(3);
+    expect(mv).toHaveLength(2);
+    expect(mv).toContainEqual({ f: 8, t: 5, d: 3 });  // A die3 -> 5 (lets die2 play)
+    expect(mv).toContainEqual({ f: 4, t: 2, d: 2 });  // C die2 -> 2 (lets die3 play)
+    expect(mv).not.toContainEqual({ f: 4, t: 1, d: 3 }); // strands die2 -> filtered
+  });
+
+  it('no over-filtering when both dice are independently playable', () => {
+    const s = st({ moves: [2, 3] });
+    s.pts[10] = { n: 1, p: 1 };
+    s.pts[20] = { n: 1, p: 1 };
+    const raw = getValidMovesRaw(s, P1);
+    const mv = getValidMoves(s, P1);
+    expect(mv).toHaveLength(raw.length); // filter is a no-op here
+  });
+
+  it('filtered moves are always a subset of raw moves', () => {
+    for (const s of [largerDiePosition(), mustUseBothPosition()]) {
+      const raw = getValidMovesRaw(s, P1);
+      for (const m of getValidMoves(s, P1)) {
+        expect(raw).toContainEqual(m);
+      }
+    }
   });
 });
 

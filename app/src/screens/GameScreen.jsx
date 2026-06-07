@@ -10,6 +10,19 @@ import {
 import { aiPlay } from '../game/ai';
 import { saveLocalGame, loadLocalGame, clearLocalGame } from '../storage/local';
 
+// Pick a die to pre-select that actually has a legal move under the (rules-
+// filtered) getValidMoves — prefer natural dice order. Avoids pre-selecting a
+// die the mandatory-move/larger-die rule makes unplayable. Returns null if the
+// player has no moves.
+function firstPlayableDie(state, player) {
+  const vm = getValidMoves(state, player);
+  if (vm.length === 0) return null;
+  for (const d of state.moves) {
+    if (vm.some(m => m.d === d)) return d;
+  }
+  return vm[0].d;
+}
+
 function Stone({ player, size = 16 }) {
   const theme = useTheme();
   const colors = { 1: theme.checkerWhite, 2: theme.checkerBlack };
@@ -158,9 +171,13 @@ export default function GameScreen({
   const currentPlayer = gs.turn || P1;
   const myTurn = isOnline ? (playerSlot === currentPlayer) : true;
   const allValidMoves = gs.phase === 'move' ? getValidMoves(gs, currentPlayer) : [];
-  const validMoves = selectedDie != null
+  // Filter to the selected die, but fall back to all valid moves if that die has
+  // none (e.g. the mandatory larger-die rule makes a pre-selected smaller die
+  // unplayable) so the board never renders as frozen.
+  const selMoves = selectedDie != null
     ? allValidMoves.filter(m => m.d === selectedDie)
     : allValidMoves;
+  const validMoves = selMoves.length > 0 ? selMoves : allValidMoves;
   const movableSources = new Set(validMoves.map(m => m.f));
   const pip1 = calcPipCount(gs, P1);
   const pip2 = calcPipCount(gs, P2);
@@ -275,7 +292,7 @@ export default function GameScreen({
       } else {
         // Resolve into move phase
         Object.assign(newGs, resolveOpening(gs.openingRolls));
-        setSelectedDie(newGs.dice[0]);
+        setSelectedDie(firstPlayableDie(newGs, newGs.turn));
       }
       updateState(newGs);
     }, tied ? 1500 : 1200);
@@ -311,7 +328,7 @@ export default function GameScreen({
       }, 1500);
       setTimeout(() => setPassOverlay(null), 2000);
     } else {
-      setSelectedDie(dice[0]);
+      setSelectedDie(firstPlayableDie(newGs, newGs.turn));
       updateState(newGs);
     }
   }, [gs, currentPlayer, myTurn, isOnline, updateState]);
@@ -430,7 +447,7 @@ export default function GameScreen({
         newGs.moves = [];
         setSelectedDie(null);
       } else {
-        setSelectedDie(newGs.moves[0]);
+        setSelectedDie(firstPlayableDie(newGs, currentPlayer));
       }
 
       updateState(newGs);

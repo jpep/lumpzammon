@@ -115,18 +115,25 @@ All game rules live in `src/game/logic.js` as pure functions with no dependencie
 - `initialBoard()` / `newGameState()` - Board setup (standard backgammon layout)
 - `rollDice()` - Random dice with doubles support (returns 4 dice on doubles)
 - `rollSingleDie()` / `resolveOpening()` - Opening roll: each player rolls one die, higher goes first using both dice as their first move (no doubles possible on first move)
-- `getValidMoves(state, player)` - Computes all legal moves considering bar, bearing off, etc.
+- `getValidMovesRaw(state, player)` - All legal single-die moves (the original generator), no mandatory-move rule. Used by the AI's sequence enumeration and by `maxDiceSequence`.
+- `maxDiceSequence(state, player)` - Deepest chain of playable dice reachable (drives the must-use-maximum-dice rule).
+- `getValidMoves(state, player)` - Legal moves **with the mandatory-move rule** applied: must play the maximum number of dice, and if only one of two distinct dice is playable it must be the larger. This is what the UI/highlighting and the AI consume. (Folded in from the devanture engine, Phase 8.1.)
 - `applyMove(state, player, move)` - Returns new immutable state after a move
 - `checkWin(state)` - Checks if either player has borne off all 15 checkers
 
+Pure scoring/flow helpers extracted from the devanture skin (Phase 8.1, tested but **not yet wired into the UI** — pending Phase 8.5):
+- `src/game/rules.js` - `classifyWin` (simple/gammon/backgammon), `winPoints`, `isInitialPosition`, `resignOutcome`.
+- `src/game/cube.js` - pure doubling-cube state machine (non-standard once-per-player, cap-4 variant; see "Tournament-Standard Rules" in PLAN.md for the standard cube).
+- `src/game/moveResolution.js` - combined multi-die move resolution + multi-pickup (`findMoveSequence`/`collectTargets`/`applyCombinedMove`/`applyMultiPickup`), engine coordinates.
+
 ### AI
 
-`src/game/ai.js` implements a greedy evaluation AI:
+`src/game/ai.js` (Phase 8.1: adopted the devanture engine — a 1-ply expectiminimax by default):
 
-- Scores board positions based on: borne-off pieces, bar pieces, blots, coverage, pip distance
-- Picks the highest-scoring move at each step (no lookahead)
-- Plays all available dice sequentially
-- Moves are applied one at a time with 750ms delays between each, so the player can follow each individual stone movement. The AI auto-rolls after 800ms.
+- `evaluate(state, player)` - Static position score: borne-off, opponent-on-bar, own-on-bar, made points, blots (worse in the opponent's home), pip advancement.
+- `greedyPlay(state, player)` - The original greedy: highest immediate `evaluate` at each step, no lookahead. Kept as the cheap difficulty level and reused as the opponent reply model.
+- `aiPlay(state, player, difficulty='normal')` - `'normal'` = 1-ply lookahead (enumerate my turn sequences, pick the one maximizing `evaluate(me)` minus the probability-weighted best greedy opponent reply); `'easy'` = greedy. Returns `{ seq, state }`. The difficulty toggle will be surfaced in the UI in Phase 8.5; lookahead is heavier (~up to 60 sequences × 21 opponent rollouts) so use `'easy'` on low-power devices.
+- Moves are applied one at a time with delays between each so the player can follow each stone movement. The AI auto-rolls after 800ms.
 
 ### Move Animation
 

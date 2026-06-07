@@ -112,7 +112,10 @@ export function farthestHome(s, pl) {
   return -1;
 }
 
-export function getValidMoves(s, pl) {
+// Raw legal single-die moves, WITHOUT the mandatory-move rule. This is the
+// original move generator; callers that need every legal move (the AI's
+// sequence enumeration, maxDiceSequence's own recursion) use this directly.
+export function getValidMovesRaw(s, pl) {
   const mv = [];
   const u = [...new Set(s.moves)];
 
@@ -141,6 +144,61 @@ export function getValidMoves(s, pl) {
     }
   }
   return mv;
+}
+
+// Deepest chain of playable dice reachable from state s (how many of the
+// remaining dice can actually be used). Drives the must-use-maximum-dice rule.
+export function maxDiceSequence(s, pl) {
+  if (s.moves.length === 0) return 0;
+  const moves = getValidMovesRaw(s, pl);
+  if (moves.length === 0) return 0;
+  let best = 0;
+  for (const m of moves) {
+    const ns = applyMove(s, pl, m);
+    const sub = 1 + maxDiceSequence(ns, pl);
+    if (sub > best) best = sub;
+    if (best >= s.moves.length) return best; // can't beat the dice we have
+  }
+  return best;
+}
+
+// Legal moves WITH the mandatory-move rule applied:
+//   1. you must play the maximum number of dice possible;
+//   2. if only one of two distinct dice can be played, it must be the larger.
+// (Perf note: maxDiceSequence is recursive with deep clones; for doubles this
+// can branch. getValidMoves is called per render for highlighting — memoize
+// per (board,moves) if highlight lag appears. Tracked in PLAN Phase 8.1.)
+export function getValidMoves(s, pl) {
+  const all = getValidMovesRaw(s, pl);
+  if (all.length === 0) return [];
+  if (s.moves.length <= 1) return all; // single remaining die: nothing to filter
+
+  // Max dice playable across any continuation from here.
+  let maxPlayable = 0;
+  for (const m of all) {
+    const ns = applyMove(s, pl, m);
+    const sub = 1 + maxDiceSequence(ns, pl);
+    if (sub > maxPlayable) maxPlayable = sub;
+    if (maxPlayable >= s.moves.length) break;
+  }
+
+  // Keep only moves that allow reaching maxPlayable.
+  let filtered = all.filter((m) => {
+    const ns = applyMove(s, pl, m);
+    return 1 + maxDiceSequence(ns, pl) >= maxPlayable;
+  });
+
+  // Larger-die rule: if only one die can be played and the two dice differ,
+  // it must be the larger one.
+  if (maxPlayable === 1 && s.moves.length === 2) {
+    const u = [...new Set(s.moves)];
+    if (u.length === 2) {
+      const maxD = Math.max(u[0], u[1]);
+      const onlyMax = filtered.filter((m) => m.d === maxD);
+      if (onlyMax.length > 0) filtered = onlyMax;
+    }
+  }
+  return filtered;
 }
 
 export function applyMove(s, pl, m) {
