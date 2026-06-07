@@ -3,8 +3,19 @@ import react from '@vitejs/plugin-react';
 import { execSync } from 'child_process';
 
 function git(cmd) {
-  try { return execSync(`git ${cmd}`, { encoding: 'utf-8' }).trim(); }
-  catch { return 'unknown'; }
+  try {
+    // Capture stderr (instead of inheriting it) so the expected-failure noise
+    // below doesn't reach the console.
+    return execSync(`git ${cmd}`, { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
+  } catch (err) {
+    // git missing (not installed in the dev container) or no repo (.git isn't
+    // mounted there) is expected — fall back silently. Surface anything else so
+    // real failures aren't hidden.
+    const stderr = (err.stderr || '').toString();
+    const expected = err.code === 'ENOENT' || /not found|not a git repository/i.test(stderr);
+    if (!expected) console.warn(`[vite] git ${cmd} failed:`, stderr.trim() || err.message);
+    return 'unknown';
+  }
 }
 
 export default defineConfig({
