@@ -244,9 +244,23 @@ This project was scaffolded from a conversation with Claude Desktop. The seed fi
 
 ---
 
+## Game Unification (`feat/unify-game`, in progress)
+
+The project currently ships **two** implementations: the React app at `/lumpzammon/` ("original") and the p5.js skin at `/lumpzammon/devanture/` ("devanture"). They are being merged into **one** game — devanture's look-and-feel, original's mechanics + online/storage, with devanture's functional upgrades folded in and no duplication. Full roadmap (phases, fold-in list, duplications, risks) lives in **PLAN.md → Phase 8**. Key architectural facts:
+
+- **The two engines are nearly identical.** `devanture/game/logic_standalone.js` is `app/src/game/logic.js`'s code (verified) re-wrapped as `window.Logic`, plus rule upgrades; the AI `evaluate()` is byte-identical. The real divergence is **rendering**: original = React DOM/CSS components; devanture = a single p5 canvas (`sketch.js`, 5642 lines).
+- **Target rendering:** embed devanture's p5 canvas inside React in **instance mode** as `<BoardCanvas>`, driven by an immutable `GameState` snapshot, emitting intents back via callbacks. Devanture's look relies on canvas-only primitives (`destination-out` knockout logo/frame, `'lighter'`+gradient glow, per-pixel dominant-hue palette, ball-physics dice, OTF PUA glyph U+F8FF) with no faithful CSS/SVG equivalent, so the canvas code is reused, not rewritten. End-state: hybrid (canvas board + DOM HUD), migrated incrementally.
+- **Single engine** in `app/src/game/` (adopt devanture's superset; re-add the original's `getBoardIndices`/flip exports). Pure rules only — cube/timers/stats become React state. `getValidMoves` gains rules-filtering (mandatory max-dice + larger-die); the old raw generator is preserved as `getValidMovesRaw`.
+- **Single Firebase project: `lumpzammon`** (modular ESM SDK, env config). Devanture's `/players` stats API is re-implemented as `storage/playerStats.js` and migrated off `gmmn-afd53` (see Phase 7.5 supersede note).
+- **Online stays React-authoritative** (`matchData.state` is the single source of truth); the canvas is a pure renderer + input surface.
+- **Sign-in:** reuse the React `MenuScreen` restyled to the GMMN look (not devanture's `drawSignin`).
+- **End state:** the `/devanture/` path, the `deploy.yml` copy step, the vite devanture-index middleware, the docker bind-mount, the DOM board components, and the p5 CDN script are all removed.
+
+---
+
 ## Devanture Skin (p5.js standalone preview)
 
-A self-contained skin preview lives in `devanture/`. It runs without Vite/React (just `index.html` + p5.js from a CDN) and is intended as a visual prototype to be merged back into the React app once stable. A small Python dev server (`serve.py`) serves it with `Cache-Control: no-store` to avoid stale assets during iteration.
+A self-contained skin preview lives in `devanture/`. It runs without Vite/React (just `index.html` + p5.js from a CDN) and is intended as a visual prototype to be merged back into the React app once stable. A small Python dev server (`serve.py`) serves it with `Cache-Control: no-store` to avoid stale assets during iteration. **Note:** per Phase 8 (`feat/unify-game`) this standalone is being absorbed into the React app and will be removed once the canvas reaches parity.
 
 ### Run locally
 
@@ -292,6 +306,8 @@ devanture/
 ```
 
 ### Firebase wiring (Phase 7.5 — in progress)
+
+> **⚠️ Superseded by Phase 8 (2026-06-07):** the unified app consolidates on the **`lumpzammon`** project and re-implements `/players` stats as `storage/playerStats.js` (modular SDK, env config). The `gmmn-afd53` wiring described below is interim, standalone-only infrastructure and is removed when `devanture/` is deleted.
 
 The skin uses Firebase Realtime Database (project `gmmn-afd53`, region `europe-west1`) for player stats. Because the skin is served as static files (no Vite/Webpack build step), Firebase is loaded via compat CDN scripts and the config is committed directly in `devanture/firebase-config.js` (Firebase web API keys are public by design — the React app's prod bundle exposes them too, and real security lives in Database Rules + Auth).
 

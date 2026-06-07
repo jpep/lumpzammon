@@ -140,6 +140,8 @@ The current AI is a single-step greedy evaluator. It works but is beatable.
 
 Avant l'intégration React de la Phase 8, on branche la skin standalone sur Firebase (projet `gmmn-afd53`, Realtime Database, Europe-west1) afin de remplacer les `PLAYER_PROFILES` mockés par des stats réelles persistées. La skin reste 100% standalone (chargement compat scripts, pas de bundler).
 
+> **⚠️ Superseded by Phase 8 (2026-06-07).** The unification decision is to **consolidate on the `lumpzammon` Firebase project** (modular ESM SDK, env-based config), with the `/players` stats schema re-implemented on top of it (`storage/playerStats.js`) and any real data **migrated off `gmmn-afd53`**. The standalone `gmmn-afd53` wiring below was interim infrastructure for the standalone skin; treat it as throwaway. Anonymous-auth on `gmmn-afd53` will stop being used once `devanture/` is deleted (Phase 8.6).
+
 ### Tasks
 
 - [x] **Infrastructure SDK** — chargement Firebase compat (app/auth/database) dans `devanture/index.html`, init dans `devanture/firebase.js`, config publique commitée dans `devanture/firebase-config.js` (template `firebase-config.example.js`).
@@ -151,9 +153,77 @@ Avant l'intégration React de la Phase 8, on branche la skin standalone sur Fire
 
 ---
 
-## Phase 8: Devanture Skin → React Integration (next PR)
+## Phase 8: Game Unification — one codebase (`feat/unify-game`)
 
-The `devanture/` p5.js skin is a visual prototype that's now feature-complete enough to merge back into the React app. Each item below maps a skin feature to the React components/hooks that will need to be added or modified.
+**Goal:** abolish the `/lumpzammon/` ("original") vs `/lumpzammon/devanture/` ("devanture") split and ship **one** game. Adopt **devanture's look-and-feel**, keep **original's core mechanics + online/storage**, fold in **devanture's intentional functional contributions**, with **zero code duplication**. The standalone `/devanture/` path is removed at the end.
+
+This section is the architectural execution plan derived from a multi-agent analysis of both codebases (2026-06-07). The detailed skin features live in the **Feature inventory** subsection further down; the phases below are how they land.
+
+### Decisions taken (2026-06-07)
+
+1. **Rendering paradigm — embed the p5 canvas in React.** Wrap devanture's `sketch.js`/`dice.js` (the ~6000 lines that produce the GMMN look — `destination-out` knockout logo/frame, `'lighter'`+gradient glow sweep, per-pixel dominant-hue palette, ball-physics dice) in a single React `<BoardCanvas>` running p5 in **instance mode**. React owns app shell, routing, game + online state; it pushes an immutable `GameState` snapshot into the canvas each change, the canvas emits intents (click/drag/roll/cube/resign) back via callbacks. These effects have **no faithful CSS/SVG equivalent** (the logo uses a custom OTF PUA glyph at U+F8FF reachable only via p5 `loadFont`), so we reuse the proven visual code rather than reimplement it. End-state target: hybrid (canvas board + DOM HUD/screens), migrated incrementally — *not* up front.
+2. **Single engine — adopt devanture's engine as canonical ES modules.** `logic_standalone.js`/`ai_standalone.js` are the original's code (verified identical bodies) **plus** real upgrades; re-home them into `app/src/game/` as the single source, re-adding the original-only `getBoardIndices`/`TOP_IDX`/`BOT_IDX`/`FLIP` exports that the standalone dropped. Keep cube/timers/stats **out** of the engine (React state); only pure rules live in `logic.js`/`rules.js`.
+3. **Firebase — consolidate on the `lumpzammon` project.** One project, one modular-ESM SDK, env-based config (no committed keys), the existing real-time subscribe + range-list. Re-implement devanture's `/players/<nick>` stats API on top of it (`storage/playerStats.js`) and **migrate stats off `gmmn-afd53`** (this supersedes the interim Phase 7.5 location — see note there). Switch `appendGame` to a transaction; unify the two nick sanitizers into one.
+4. **Sign-in — reuse the React `MenuScreen`, restyled to the GMMN look.** Drop the skin's `drawSignin`; keep the same `bg:nick` key and add Firebase nickname-uniqueness (per the existing Phase 8 sign-in task). Do **not** adopt devanture's 4-sub-mode sign-in shell.
+
+### Architecture (supporting decisions)
+
+- **Online ↔ canvas:** React stays authoritative — Firebase `matchData.state` is the single source of truth, `updateState`/`onUpdateMatch` the only write path; the canvas is a pure renderer + input surface. P2 perspective via the `direction` flag + `getBoardIndices`. Devanture's `setTimeout`-driven turn/opening/AI choreography is re-homed into React effects.
+- **State shape:** extend the original's hooks/Context as the single owner; eliminate devanture's ~20 module-globals. Adopt a lightweight store (Zustand) **only** if profiling shows snapshot churn into the canvas is a problem.
+- **Assets:** bring fonts/backgrounds into the Vite asset graph (hashed, cache-busted). CSS `@font-face` for fallback **and** p5 `loadFont` for the PUA glyph must point at the same bundled file; preload via `document.fonts.load`; compress the 1.6 MB `fond1.jpg` preserving mid-luma (the translucent palette depends on it).
+- **Routing:** collapse to one React entry; fold devanture's screens into `App.jsx`'s state machine; delete the `/devanture/` path, the `deploy.yml` `cp -r devanture …` step, the `vite.config.js` devanture-index middleware, and the docker bind-mount. Optionally keep a dev-only canvas preview route.
+
+### Devanture logic contributions to fold back (engine-level, pure)
+
+| Contribution | Lands in | Rec |
+|---|---|---|
+| **Mandatory-move rule** (use max dice; force larger die) — fixes a documented rules gap | `logic.js`: `getValidMovesRaw` (= current `getValidMoves`) + new filtering `getValidMoves` + `maxDiceSequence` | adopt |
+| **1-ply expectiminimax AI** (blot-aware; ~1000× more sims) | `ai.js`: new `aiPlay`; export `greedyPlay` + `evaluate`; **gate behind a difficulty toggle** | adopt |
+| **Gammon/backgammon classification + scoring** (`classifyWin`/`winPoints`) | new `app/src/game/rules.js` (pure) | merge |
+| **Resign with multiplier** (+ `isInitialPosition` guard) | `rules.js` helpers + React resign action | merge |
+| **Bar-fully-blocked auto-pass** (`isBarThrowImpossible`) | `logic.js` pure helper, called from the React turn handler | adopt |
+| **Doubling cube** (non-standard once-per-player cap-4 variant — *confirm ruleset; see Crawford TODO*) | new `app/src/game/cube.js` reducer + React state | merge |
+| **Timers + forfeit** (wall-clock, throttle-immune) | `app/src/hooks/useGameTimers.js` | merge |
+| **Combined multi-die / multi-pickup moves** | `app/src/game/moveResolution.js` (note: existing Phase 8 task says `logic.js` — reconcile) | merge |
+| **Intermediate-hit detection for combined AI moves** | animation layer (renderer), not `logic.js` | merge |
+
+⚠️ **`getValidMoves` changes semantics** (raw → rules-filtered) under the same name — every caller (`GameScreen` highlight, `ai.js`) must consume the filtered list, and `getValidMovesRaw` must be exported for genuinely-raw use. Avoid copying the dead `wV` branch at `adapter.js:865-873`.
+
+### Migration phases (incremental, app stays shippable each phase)
+
+- [ ] **Phase 8.0 — Baseline & constants (no behaviour change).** Add vitest (via Docker); write `app/src/game/__tests__/logic.test.js` locking in the *original* (raw) move semantics; extract storage key-prefixes (`bg:match:`/`bg:lobby:`/`bg:session:`/`bg:localGame:`/`bg:nick`) into `app/src/game/constants.js` and import them in `useOnlineMatch`/`useKickDetection`/`LobbyScreen`/`AdminPanel`/`storage/local.js`.
+- [ ] **Phase 8.1 — Unify the engine.** In `logic.js`: rename current `getValidMoves`→`getValidMovesRaw`, port `maxDiceSequence` + the filtering `getValidMoves`, keep the flip exports. In `ai.js`: adopt the 1-ply `aiPlay`, export `greedyPlay`/`evaluate`. Extract pure `rules.js` (`classifyWin`/`winPoints`/`isInitialPosition`), `cube.js`, `moveResolution.js` from `adapter.js` logic — with unit tests; not yet wired to UI. Add a difficulty toggle for the AI. App still uses the DOM board.
+- [ ] **Phase 8.2 — Unify Firebase + stats on `lumpzammon`.** Create `app/src/storage/playerStats.js` (`getPlayer`/`ensurePlayer`/`appendGame` over `/players/<nick>` via the modular adapter, transactional `appendGame`, one `sanitizeNick`). Plan a one-time export/import of any real `/players` data from `gmmn-afd53`. Add `database.rules.json` (currently absent). Decide auth model (anon vs none) and document it. No screen consumes it until 8.5.
+- [ ] **Phase 8.3 — Canvas spike (de-risk early).** Add `p5` as an npm dep (drop the CDN script). Mount devanture's sketch in `app/src/canvas/CanvasGame.jsx` in **instance mode** behind a flag, served by Vite with bundled fonts/`fond*.jpg`. Port a minimal slice (geometry + palette + `drawBoard` + `drawChecker`) over a hardcoded snapshot; verify hue palette, staircase triangles, hollow GMMN frame, the PUA glyph, retina/resize, and StrictMode teardown all work. Document findings.
+- [ ] **Phase 8.4 — Drive the canvas from the live engine.** Split `sketch.js` into `app/src/canvas/{geometry,palette,sketch}.js`; port `dice.js`→`app/src/canvas/dice.js` as ES modules; convert all window-globals to passed-in state. Render live `GameState`; wire canvas drag → `moveResolution.js` → "move made" callback; port flying-checker/board-fill/turn-morph animations from state diffs; reuse `getBoardIndices` for mirror. Canvas selectable behind the flag for A/B vs the DOM board.
+- [ ] **Phase 8.5 — Flow/timers/cube/stats/screens into React; canvas default.** `useGameFlow.js` (turn/opening/no-moves-pass/bar-block, using `rules.js`/`cube.js`/`moveResolution.js`, hook-owned timeouts — no globals/`setTimeout`-globals), `useGameTimers.js`, cube reducer + AI cube decision via `evaluate`. Wire `playerStats.appendGame` on game end. `StatsScreen.jsx` profile overlay; restyle `LobbyScreen` with GMMN room visuals over the real Firebase lobby; merge `ModeSelect`/`BuildInfo` into the GMMN menu/About. Make `CanvasGame` the default; verify online sync/reconnect/kick/local-persistence. Reconcile theming (photo-derived identity; decide fate of the 4 nick palettes + rainbow easter egg).
+- [ ] **Phase 8.6 — Delete devanture & dead code.** Remove the DOM board (`Board`/`Point`/`Checker`/`BarZone`/`DiceFace`, the old responsive/animation code). Delete the entire `devanture/` dir, the vite middleware, the `deploy.yml` copy step, the docker bind-mount, the p5 CDN reliance. Update DOCS/PLAN. Full regression: local, vs-AI, online (two tabs) on the deployed Pages build.
+
+### Duplications to eliminate (→ single home)
+
+- Rules engine: `app/src/game/logic.js` + `devanture/game/logic_standalone.js` → **`app/src/game/logic.js`**
+- AI: `app/src/game/ai.js` + `devanture/game/ai_standalone.js` → **`app/src/game/ai.js`**
+- Dice render/state: `components/DiceFace.jsx` + `devanture/dice.js` → **`app/src/canvas/dice.js`**
+- Firebase: `storage/firebaseAdapter.js` + `devanture/firebase.js`/`firebase-config.js` → **`storage/firebaseAdapter.js`** (one project) + **`storage/playerStats.js`**
+- Stats data/API + mock `PLAYER_PROFILES` → **`storage/playerStats.js`** (mock retired)
+- Turn flow/opening/pass/finalize: `GameScreen.jsx` inline + `adapter.js` → **`hooks/useGameFlow.js`**
+- Win-type/scoring, cube, combined-move resolution (all in `adapter.js`) → **`rules.js`**, **`cube.js`**, **`moveResolution.js`**
+- Board geometry constants (px in `Board.jsx`/`GameScreen.jsx` vs r/a in `sketch.js`) → **`app/src/canvas/geometry.js`**
+- Storage-key literals duplicated across 5+ files → **`app/src/game/constants.js`**
+- p5 CDN `<script>` → **npm dependency**
+
+### Top risks
+
+- **p5 global-mode → instance-mode** conversion (5642-line `sketch.js` + 964-line `adapter.js` on ~20 globals + nested `setTimeout`s) under React StrictMode — orphaned timers / double-fired opening & AI turns. The spike (8.3) de-risks *rendering*; the *flow* re-homing (8.5) is the larger correctness surface — give the `setTimeout`-chain conversion explicit timer-cleanup/guard patterns.
+- **Stateful features over the racy whole-object write** (`useOnlineMatch.js:62-68` read-modify-write): online timers/forfeit need a single authoritative writer; the cube is a two-client handshake — both risk last-write-wins/split-brain. May make transactional writes a prerequisite, not optional hardening.
+- **Mandatory-move filter under the old per-die UI (8.1, transitional):** if `selectedDie` is the smaller die and the larger-die rule forbids it first, the filtered list is empty and the die looks dead mid-turn; `getValidMoves` also now runs `maxDiceSequence` (recursive deep-clone) every render (`GameScreen.jsx:160`) → highlight lag on doubles. Moot once the canvas drag/combined model replaces per-die selection (8.4+).
+- **Asset pipeline:** ~11 bare relative `loadFont`/`loadImage` paths in `sketch.js`/`dice.js` 404 under Vite — each call site must be rewritten to an imported hashed URL. The repo ships **19 font files** (7 nortechico OTF weights + 12 PIX-DOT TTF), not a subset — copy the full `fonts/` dir.
+- **Behaviour ships before look:** Phase 8.1 changes gameplay (mandatory-move + stronger AI) while still on the DOM board — "shippable" means *renders*, not *gameplay unchanged*.
+- **Score-recording coupling:** `finalizeMoveStep` increments `gameScore` *before* recording, and resign vs normal use slightly different point computations — preserve or deliberately reconcile when porting to `playerStats.appendGame`.
+
+### Feature inventory
+
+The skin features below are delivered across the phases above. Each maps a skin feature to the React components/hooks it needs.
 
 ### Tasks
 
