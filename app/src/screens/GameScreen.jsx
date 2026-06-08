@@ -9,7 +9,9 @@ import {
   getValidMoves, applyMove, checkWin, clone, calcPipCount, P1, P2
 } from '../game/logic';
 import { applyCombinedMove } from '../game/moveResolution';
+import { gameEndResult } from '../game/gameResult';
 import { aiPlay } from '../game/ai';
+import { appendGame } from '../storage/playerStats';
 import { saveLocalGame, loadLocalGame, clearLocalGame } from '../storage/local';
 
 // Phase 8.5a: the p5 CanvasBoard is the default game board. Append ?dom (dev) to
@@ -167,6 +169,9 @@ export default function GameScreen({
   const canvasInstRef = useRef(null);
   const gsRef = useRef(gs);
   const handleCanvasReady = useCallback((inst) => { canvasInstRef.current = inst; }, []);
+  // Seeded with the current winner so reconnecting to a finished game does not
+  // re-record it; reset to 0 on a new game so the next win records.
+  const recordedWinnerRef = useRef(gs.winner);
 
   useEffect(() => {
     const update = () => setBoardScale(calcScale());
@@ -505,6 +510,22 @@ export default function GameScreen({
     updateState(finishMove(moved, currentPlayer));
   }, [gs, currentPlayer, myTurn, isAI, updateState]);
 
+  // Record the finished game to the player's Firebase stats profile, once per
+  // game end. Skips local 2P (ambiguous identity) and missing nick. Online: both
+  // clients fire, each recording for its own nick (no per-nick double-record).
+  useEffect(() => {
+    const w = gs.winner;
+    if (!w) { recordedWinnerRef.current = 0; return; }
+    if (recordedWinnerRef.current === w) return; // already recorded (or reconnect)
+    recordedWinnerRef.current = w;
+    if (!nick) return;
+    const oppName = isOnline
+      ? ((matchData?.players && matchData.players[playerSlot === P1 ? P2 : P1]) || 'Opponent')
+      : 'AI';
+    const result = gameEndResult({ gs, winner: w, isOnline, isAI, playerSlot, opponentName: oppName });
+    if (result) appendGame(nick, result);
+  }, [gs.winner]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // DEV-only hook for the Playwright verifier (read engine state + canvas geom).
   useEffect(() => { gsRef.current = gs; });
   useEffect(() => {
@@ -514,12 +535,18 @@ export default function GameScreen({
       geom: () => canvasInstRef.current?.getGeom?.() || null,
       direction: () => direction,
       validMoves: () => getValidMoves(gsRef.current, gsRef.current.turn || P1),
+      // Force a simple win (for the stats integration test). loser keeps off>0.
+      forceWin: (player) => {
+        const loser = player === P1 ? P2 : P1;
+        updateState({ ...gsRef.current, off: { [player]: 15, [loser]: 3 }, winner: player, phase: 'done' });
+      },
     };
     return () => { window.__gs = undefined; };
-  }, [direction]);
+  }, [direction, updateState]);
 
   const handleNewGame = () => {
     const fresh = newGameState();
+    recordedWinnerRef.current = 0; // arm stats recording for the next game's win
     updateState(fresh);
     setSelectedFrom(null);
     setSelectedDie(null);
