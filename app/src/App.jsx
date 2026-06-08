@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback, Suspense, lazy } from 'react';
 import MenuScreen from './screens/MenuScreen';
-import ModeSelectScreen from './screens/ModeSelectScreen';
 import LobbyScreen from './screens/LobbyScreen';
 import GameScreen from './screens/GameScreen';
 import KickedScreen from './screens/KickedScreen';
@@ -77,20 +76,13 @@ export default function App() {
     });
   }, [nick, reconnectMatch]);
 
-  const handleStart = (nickname) => {
+  // Merged menu: nickname + mode picked together (ModeSelect folded into MenuScreen).
+  const handleStart = (nickname, selectedMode) => {
     setNick(nickname);
     saveNick(nickname);
     setCurrentNick(nickname);
-    setScreen('modeSelect');
-  };
-
-  const handleSelectMode = async (selectedMode) => {
     setMode(selectedMode);
-    if (selectedMode === 'online') {
-      setScreen('lobby');
-    } else {
-      setScreen('game');
-    }
+    setScreen(selectedMode === 'online' ? 'lobby' : 'game');
   };
 
   const handleCreateMatch = async () => {
@@ -106,7 +98,7 @@ export default function App() {
   const handleBack = () => {
     leaveMatch();
     setMode(null);
-    setScreen('modeSelect');
+    setScreen('menu');
   };
 
   const handleBackToMenu = () => {
@@ -149,13 +141,6 @@ export default function App() {
   return (
     <ThemeProvider theme={theme}>
       {screen === 'menu' && <MenuScreen onStart={handleStart} />}
-      {screen === 'modeSelect' && (
-        <ModeSelectScreen
-          nick={nick}
-          onSelectMode={handleSelectMode}
-          onBack={handleBackToMenu}
-        />
-      )}
       {screen === 'lobby' && (
         <LobbyScreen
           nick={nick}

@@ -1,7 +1,13 @@
+// Online lobby, restyled to the GMMN look (Phase 8.5c-2): the fond/nortechico
+// shell over the real Firebase lobby, framed like a GMMN room. Functionality
+// (sList/sGet on KEY_LOBBY, create/join) is unchanged.
+
 import React, { useState, useEffect, useRef } from 'react';
 import { sList, sGet } from '../storage';
 import { KEY_LOBBY } from '../game/constants';
 import { useTheme } from '../ThemeContext';
+import GmmnScreen from '../components/GmmnScreen';
+import { gmmnTitle, gmmnButton, gmmnButtonSmall, NORTECHICO } from '../ui/gmmn';
 
 export default function LobbyScreen({ nick, onCreateMatch, onJoinMatch, onBack }) {
   const [lobbies, setLobbies] = useState([]);
@@ -26,84 +32,58 @@ export default function LobbyScreen({ nick, onCreateMatch, onJoinMatch, onBack }
     return () => clearInterval(intervalRef.current);
   }, []);
 
-  const containerStyle = {
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: '100vh',
-    background: theme.bg,
-  };
-
-  const btnStyle = {
-    background: theme.btnBg,
-    color: theme.btnText,
-    border: 'none',
-    borderRadius: 8,
-    padding: '12px 32px',
-    fontSize: 16,
-    cursor: 'pointer',
-    fontWeight: 'bold',
-  };
-
-  const btnSmall = {
-    background: 'transparent',
-    color: theme.btnOutlineText,
-    border: `1px solid ${theme.btnOutlineBorder}`,
-    borderRadius: 8,
-    padding: '6px 16px',
-    fontSize: 13,
-    cursor: 'pointer',
+  // GMMN "room": a board-outline frame around the lobby content.
+  const frame = {
+    border: `1.5px solid ${theme.text}`,
+    borderRadius: 12,
+    background: 'rgba(0,0,0,0.45)',
+    padding: '24px 26px',
+    width: 360,
+    maxWidth: '100%',
+    boxShadow: '0 0 30px rgba(0,0,0,0.6)',
   };
 
   return (
-    <div style={containerStyle}>
-      <h2 style={{ color: theme.text, marginBottom: 24 }}>Online Lobby</h2>
+    <GmmnScreen>
+      <h2 style={{ ...gmmnTitle(theme), fontSize: 26, marginBottom: 18 }}>Online Lobby</h2>
 
-      <button onClick={onCreateMatch} style={btnStyle}>
-        Create Match
-      </button>
+      <div style={frame}>
+        <button onClick={onCreateMatch} style={{ ...gmmnButton(theme), width: '100%', minWidth: 0 }}>
+          Create Match
+        </button>
 
-      <div style={{ marginTop: 24, width: 320 }}>
-        <h3 style={{ color: theme.textSecondary, marginBottom: 12 }}>
-          Open Matches {loading ? '...' : `(${lobbies.length})`}
+        <h3 style={{ color: theme.textSecondary, fontSize: 13, margin: '20px 0 10px', fontFamily: NORTECHICO, letterSpacing: 1 }}>
+          OPEN MATCHES {loading ? '…' : `(${lobbies.length})`}
         </h3>
+
         {lobbies.length === 0 && !loading && (
-          <p style={{ color: theme.textMuted, fontSize: 14 }}>No open matches. Create one!</p>
+          <p style={{ color: theme.textMuted, fontSize: 14, fontFamily: NORTECHICO }}>No open matches. Create one!</p>
         )}
-        {lobbies.map(lobby => (
+
+        {lobbies.map((lobby) => (
           <div
             key={lobby.id}
             style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              background: theme.bgPanel,
-              border: `1px solid ${theme.border}`,
-              borderRadius: 8,
-              padding: '10px 14px',
-              marginBottom: 8,
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+              background: 'rgba(0,0,0,0.4)', border: `1px solid ${theme.border}`,
+              borderRadius: 8, padding: '10px 14px', marginBottom: 8,
             }}
           >
-            <span style={{ color: theme.text }}>{lobby.host}'s game</span>
-            {lobby.host !== nick && (
-              <button
-                onClick={() => onJoinMatch(lobby.id)}
-                style={{ ...btnSmall, background: theme.btnBg }}
-              >
+            <span style={{ color: theme.text, fontFamily: NORTECHICO }}>{lobby.host}'s game</span>
+            {lobby.host !== nick ? (
+              <button onClick={() => onJoinMatch(lobby.id)} style={{ ...gmmnButtonSmall(theme), background: theme.btnBg, color: theme.btnText }}>
                 Join
               </button>
-            )}
-            {lobby.host === nick && (
-              <span style={{ color: theme.textSecondary, fontSize: 13 }}>Waiting...</span>
+            ) : (
+              <span style={{ color: theme.textSecondary, fontSize: 13, fontFamily: NORTECHICO }}>Waiting…</span>
             )}
           </div>
         ))}
       </div>
 
-      <button onClick={onBack} style={{ ...btnSmall, marginTop: 24 }}>
+      <button onClick={onBack} style={{ ...gmmnButtonSmall(theme), marginTop: 22 }}>
         Back
       </button>
-    </div>
+    </GmmnScreen>
   );
 }

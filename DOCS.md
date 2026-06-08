@@ -354,7 +354,18 @@ Clicking a player's name in `GameScreen` opens **`screens/StatsScreen.jsx`** —
 - **Wiring:** `GameScreen` gets a `profileNick` state + `profileNickFor(slot)` (online → `matchData.players[slot]`; local/AI → the human's nick for P1; the AI/local-2P second seat → `null`, so its name isn't clickable). `PlayerTag` names become clickable (dotted underline) when a profile nick exists.
 - **Modal layering:** the overlay is `z-index: 100` so it sits above `BuildInfo`'s permanent `z-50` info icon (which otherwise pokes through the veil). Closes via backdrop click or the `×`; `data-testid="stats-overlay"` backs the verifier.
 - **Verified (Playwright):** seeded a Firebase profile → opened the overlay and read back the exact line (`(+3) 59% 87 games #NOVICE since 2025-09-01`) + 5 correctly-formatted rows; close via backdrop and `×` both work; 0 console errors. 86 unit tests green. Seeded test profile deleted afterward.
-- **Still pending in 8.5c:** restyle `LobbyScreen` to the GMMN look, merge `ModeSelect`/`BuildInfo`/About into a GMMN menu, theming reconciliation, and the score polyline chart.
+- **Still pending in 8.5c:** the score polyline chart.
+
+### Phase 8.5c-2 — GMMN screen identity + menu merge (done)
+
+The menu and lobby now share the canvas board's look: the **fond photo backdrop + a dark veil + the nortechico pixel font**, with the **per-nick palette tinting the accents** (the "GMMN aesthetic + nick accent" choice). The 3 per-nick palettes and the rainbow easter egg (`RainbowDecorations` for nick `simon`) are **kept**.
+
+- **`app/src/ui/gmmn.js`** — shared primitives: `ensureNortechico()` (idempotent `@font-face` registration), `GMMN_FOND` (the bundled `fond2.jpg`), `NORTECHICO` family string, and style helpers `gmmnTitle`/`gmmnDivider`/`gmmnButton`/`gmmnButtonSmall`/`gmmnInput` (all take the nick `theme` so accents stay per-nick; `gmmnTitle` keeps the rainbow gradient for `simon`).
+- **`components/GmmnScreen.jsx`** — the shell: full-screen fond backdrop + `rgba(0,0,0,0.62)` veil + centred content; registers the font on mount.
+- **Menu + ModeSelect merged** — `MenuScreen` now does nickname **and** mode selection in one GMMN screen; `onStart(nick, mode)` goes straight to the game (local/ai) or lobby (online). `ModeSelectScreen.jsx` deleted; `App.jsx`'s `modeSelect` screen state + `handleSelectMode` removed; `handleBack` returns to `menu`.
+- **`LobbyScreen`** restyled on the shell as a GMMN "room" (board-outline frame over the real Firebase lobby; functionality unchanged).
+- **Verified (Playwright):** menu renders the fond + nortechico title + 3 mode buttons; the merged flow reaches the lobby (Online) and the game (vs Computer); lobby shows the framed room; 0 console errors; 86 unit tests green; build clean.
+- **Note:** `CanvasBoard` still registers the font inline (its verified mount left untouched); both paths use the same `nortechico` family. `GameScreen`'s own surround keeps the solid theme background for now (the board draws its own fond) — giving the in-game surround the fond too is a later polish.
 
 ---
 
