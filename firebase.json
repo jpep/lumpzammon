@@ -1,0 +1,6 @@
+{
+  "//": "Maps the Realtime Database rules source-of-truth for manual `firebase deploy --only database`. NOT used by the GitHub Pages pipeline, which ships only static files. See DOCS.md -> Game Unification -> Phase 8.2.",
+  "database": {
+    "rules": "database.rules.json"
+  }
+}

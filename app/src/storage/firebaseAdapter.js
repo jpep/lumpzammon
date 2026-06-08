@@ -16,7 +16,12 @@ const firebaseConfig = {
 
 let db = null;
 
-function getDb() {
+// Shared accessor for the one initialized Firebase app/db. Exported so other
+// Firebase-backed modules (e.g. storage/playerStats.js) reuse the same app
+// instance instead of calling initializeApp twice (which throws). The key/value
+// facade below sanitizes keys to flat top-level names; modules that need real
+// nested paths (e.g. /players/<nick>) or transactions import getDb directly.
+export function getDb() {
   if (!db) {
     const app = initializeApp(firebaseConfig);
     db = getDatabase(app);

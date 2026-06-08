@@ -1,0 +1,32 @@
+{
+  // Lumpzammon Realtime Database security rules — source of truth.
+  //
+  // NOT auto-deployed: the GitHub Pages pipeline ships only static files and
+  // never runs the Firebase CLI. Apply manually via the Firebase console
+  // (Realtime Database -> Rules) or `firebase deploy --only database`.
+  //
+  // AUTH MODEL (Phase 8.2 decision): NONE for now. The web client
+  // (app/src/storage/firebaseAdapter.js) does not authenticate, and online play
+  // works on open read/write. Requiring `auth != null` here would break the live
+  // app until anonymous auth is wired into the adapter, so that hardening is
+  // deferred to Phase 5 ("Firebase auth" + "Security rules"). These rules keep
+  // reads and writes open (test-mode parity) but add shape validation on the new
+  // /players stats namespace so it cannot be filled with garbage.
+  //
+  // Root ".read" MUST stay true: firebaseAdapter.list() runs an orderByKey range
+  // query against the database ROOT to enumerate bg:match: / bg:lobby: keys.
+  "rules": {
+    ".read": true,
+    ".write": true,
+
+    "players": {
+      "$nick": {
+        ".validate": "newData.hasChildren(['firstPlay', 'totalGames', 'wins'])",
+        "firstPlay":  { ".validate": "newData.isString()" },
+        "totalGames": { ".validate": "newData.isNumber() && newData.val() >= 0" },
+        "wins":       { ".validate": "newData.isNumber() && newData.val() >= 0" },
+        "winPercent": { ".validate": "newData.isNumber()" }
+      }
+    }
+  }
+}
