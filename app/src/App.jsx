@@ -129,6 +129,7 @@ export default function App() {
       return (
         <Suspense fallback={<div style={{ color: '#fff', padding: 20 }}>loading canvas…</div>}>
           <CanvasGame
+            live={params.get('canvas') === 'live'}
             showFrame={params.get('canvas') !== 'board'}
             showMark={params.has('mark')}
             snap={params.get('snap') || 'initial'}

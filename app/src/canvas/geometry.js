@@ -30,7 +30,7 @@ export function computeGeometry(cssW, cssH) {
   const r = a / 2;
   const bx = (cssW - 13 * a) / 2; // board centred horizontally
   const by = (cssH - 13 * a) / 2; // board centred vertically
-  return { a, r, bx, by, diceOnSide };
+  return { a, r, bx, by, diceOnSide, cssW, cssH };
 }
 
 // Pixel centre X of point index pt (1..24). (pt==0 bear-off branch dropped for
@@ -63,4 +63,14 @@ export function barPieceCY(g, isWhite, idx) {
 // Bar column centre X.
 export function barCenterX(g) {
   return g.bx + 6.5 * g.a;
+}
+
+// Y of the next empty stack slot on point pt (where a dropped checker lands).
+export function ptNextY(g, pt, count) {
+  return stackCY(g, pt, Math.min(count, MAX_STACK));
+}
+
+// Y of the topmost existing checker on point pt (where a source halo sits).
+export function ptTopY(g, pt, count) {
+  return stackCY(g, pt, Math.min(count, MAX_STACK) - 1);
 }
