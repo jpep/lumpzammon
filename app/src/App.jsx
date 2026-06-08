@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback, Suspense, lazy } from 'react';
 import MenuScreen from './screens/MenuScreen';
 import ModeSelectScreen from './screens/ModeSelectScreen';
 import LobbyScreen from './screens/LobbyScreen';
@@ -12,6 +12,15 @@ import RainbowDecorations from './components/RainbowDecorations';
 import { getTheme } from './theme';
 import { ThemeProvider } from './ThemeContext';
 import { loadNick, saveNick, clearNick, loadSession, clearSession, loadLocalGame, setCurrentNick } from './storage/local';
+
+// Phase 8.3 canvas spike — dev-only, lazy-loaded. Gating the lazy() behind
+// import.meta.env.DEV (a literal `false` in prod builds) lets Rollup drop the
+// dynamic import entirely, so neither p5 nor the fond/font assets are emitted
+// into the production dist. Reached via ?canvas (frame composite),
+// ?canvas=board (bright board, no frame), and an optional &mark (U+F8FF glyph).
+const CanvasGame = import.meta.env.DEV
+  ? lazy(() => import('./components/CanvasGame'))
+  : null;
 
 export default function App() {
   const [screen, setScreen] = useState('menu');
@@ -110,6 +119,24 @@ export default function App() {
   };
 
   const theme = useMemo(() => getTheme(nick), [nick]);
+
+  // Dev-only canvas spike (Phase 8.3). Placed after all hooks so rules-of-hooks
+  // hold. import.meta.env.DEV is false in production builds, so this whole
+  // branch (and the lazy p5 chunk) is dropped from the shipped app.
+  if (import.meta.env.DEV && typeof window !== 'undefined') {
+    const params = new URLSearchParams(window.location.search);
+    if (params.has('canvas')) {
+      return (
+        <Suspense fallback={<div style={{ color: '#fff', padding: 20 }}>loading canvas…</div>}>
+          <CanvasGame
+            showFrame={params.get('canvas') !== 'board'}
+            showMark={params.has('mark')}
+            snap={params.get('snap') || 'initial'}
+          />
+        </Suspense>
+      );
+    }
+  }
 
   if (kicked && screen === 'game') {
     return (

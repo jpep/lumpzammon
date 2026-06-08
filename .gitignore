@@ -13,6 +13,10 @@ dist/
 
 screenshots/
 
+# Throwaway browser-verification scratch (Playwright driver + PNGs); see the
+# verifier-browser skill / DOCS "Browser verification (Playwright)".
+.verify/
+
 WIP.md
 
 # Local Claude Code config (per-user, not for repo) — but DO track shared skills
