@@ -24,6 +24,36 @@ function formatGameDate(iso) {
   return `${pad(d.getFullYear() % 100)}/${pad(d.getMonth() + 1)}/${pad(d.getDate())}`;
 }
 
+// Score-over-time polyline (devanture drawScorePolyline, as responsive SVG).
+// X = date span; Y auto-scaled to the data (with the 0 baseline shown). Needs
+// >= 2 history points; otherwise renders nothing.
+function ScoreChart({ history, color, baselineColor }) {
+  const pts = (history || []).filter((p) => p && p.date && Number.isFinite(Date.parse(p.date)));
+  if (pts.length < 2) return null;
+  const W = 520; const H = 96; const padX = 3; const padY = 8;
+  const times = pts.map((p) => Date.parse(p.date));
+  const t0 = Math.min(...times); const t1 = Math.max(...times);
+  const span = Math.max(1, t1 - t0);
+  const scores = pts.map((p) => Number(p.score) || 0);
+  const lo = Math.min(0, ...scores);
+  let hi = Math.max(0, ...scores);
+  if (hi === lo) hi = lo + 1;
+  const sx = (t) => padX + ((t - t0) / span) * (W - 2 * padX);
+  const sy = (s) => padY + (1 - (s - lo) / (hi - lo)) * (H - 2 * padY);
+  const line = pts.map((p) => `${sx(Date.parse(p.date)).toFixed(1)},${sy(Number(p.score) || 0).toFixed(1)}`).join(' ');
+  const zeroY = sy(0).toFixed(1);
+
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} preserveAspectRatio="none"
+      style={{ display: 'block', marginTop: 12 }} aria-label="score over time">
+      <line x1={padX} y1={zeroY} x2={W - padX} y2={zeroY}
+        stroke={baselineColor} strokeWidth="1" strokeDasharray="4 4" vectorEffect="non-scaling-stroke" />
+      <polyline points={line} fill="none" stroke={color} strokeWidth="2.5"
+        strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+    </svg>
+  );
+}
+
 export default function StatsScreen({ nick, onClose }) {
   const theme = useTheme();
   const [profile, setProfile] = useState(undefined); // undefined = loading, null = none
@@ -88,6 +118,8 @@ export default function StatsScreen({ nick, onClose }) {
             <div style={{ marginTop: 4, fontSize: 12, color: theme.textSecondary }}>
               since {String(profile.firstPlay || '').slice(0, 10)}
             </div>
+
+            <ScoreChart history={profile.scoreHistory} color={theme.goldBright} baselineColor={theme.border} />
 
             <table style={{ width: '100%', marginTop: 16, borderCollapse: 'collapse', fontSize: 14 }}>
               <tbody>

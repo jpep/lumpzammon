@@ -354,7 +354,7 @@ Clicking a player's name in `GameScreen` opens **`screens/StatsScreen.jsx`** —
 - **Wiring:** `GameScreen` gets a `profileNick` state + `profileNickFor(slot)` (online → `matchData.players[slot]`; local/AI → the human's nick for P1; the AI/local-2P second seat → `null`, so its name isn't clickable). `PlayerTag` names become clickable (dotted underline) when a profile nick exists.
 - **Modal layering:** the overlay is `z-index: 100` so it sits above `BuildInfo`'s permanent `z-50` info icon (which otherwise pokes through the veil). Closes via backdrop click or the `×`; `data-testid="stats-overlay"` backs the verifier.
 - **Verified (Playwright):** seeded a Firebase profile → opened the overlay and read back the exact line (`(+3) 59% 87 games #NOVICE since 2025-09-01`) + 5 correctly-formatted rows; close via backdrop and `×` both work; 0 console errors. 86 unit tests green. Seeded test profile deleted afterward.
-- **Still pending in 8.5c:** the score polyline chart.
+- **8.5c-3 (done):** the profile now includes a **score-over-time polyline** — a responsive SVG (`ScoreChart` in `StatsScreen.jsx`) ported from devanture's `drawScorePolyline`: X = the `scoreHistory` date span, Y auto-scaled to the data with the zero baseline shown (dashed), drawn in the nick's gold accent. Renders only with ≥2 history points. Verified (Playwright): an 8-point history rendered an 8-vertex polyline; 0 errors.
 
 ### Phase 8.5c-2 — GMMN screen identity + menu merge (done)
 
