@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Board from '../components/Board';
 import CanvasBoard from '../components/CanvasBoard';
+import StatsScreen from './StatsScreen';
 import Checker from '../components/Checker';
 import DiceFace from '../components/DiceFace';
 import { useTheme } from '../ThemeContext';
@@ -49,7 +50,7 @@ function Stone({ player, size = 16 }) {
   );
 }
 
-function PlayerTag({ name, player, isYou, isTurn, action, winner, align, pip }) {
+function PlayerTag({ name, player, isYou, isTurn, action, winner, align, pip, onNameClick }) {
   const theme = useTheme();
   const isRight = align === 'right';
   const actionStyle = {
@@ -62,6 +63,9 @@ function PlayerTag({ name, player, isYou, isTurn, action, winner, align, pip }) 
     color: isTurn ? theme.textHighlight : theme.text,
     fontWeight: isTurn ? 'bold' : 'normal',
     fontSize: 15,
+    cursor: onNameClick ? 'pointer' : 'default',
+    textDecoration: onNameClick ? 'underline dotted' : 'none',
+    textUnderlineOffset: 3,
   };
   const pipStyle = {
     color: theme.textSecondary,
@@ -86,14 +90,14 @@ function PlayerTag({ name, player, isYou, isTurn, action, winner, align, pip }) 
       {isRight ? (
         <>
           {pipTag}
-          <span style={nameStyle}>{name}</span>
+          <span style={nameStyle} onClick={onNameClick || undefined}>{name}</span>
           {youTag}
           <Stone player={player} />
         </>
       ) : (
         <>
           <Stone player={player} />
-          <span style={nameStyle}>{name}</span>
+          <span style={nameStyle} onClick={onNameClick || undefined}>{name}</span>
           {youTag}
           {pipTag}
         </>
@@ -147,6 +151,7 @@ export default function GameScreen({
 
   const [selectedFrom, setSelectedFrom] = useState(null);
   const [selectedDie, setSelectedDie] = useState(null);
+  const [profileNick, setProfileNick] = useState(null);
   const [message, setMessage] = useState('');
   const [passOverlay, setPassOverlay] = useState(null);
   const BOARD_WIDTH = 620;
@@ -565,6 +570,14 @@ export default function GameScreen({
     return p === P1 ? (nick || 'White') : 'Black';
   };
 
+  // The Firebase-profile nick for a player slot (null when there's none to show:
+  // the AI, or local 2P's second seat). Clicking such a name opens StatsScreen.
+  const profileNickFor = (p) => {
+    if (isOnline) return matchData?.players?.[p] || null;
+    if (p === P1) return nick || null; // local/AI: the human is P1
+    return null;
+  };
+
   const containerStyle = {
     display: 'flex',
     flexDirection: 'column',
@@ -623,6 +636,7 @@ export default function GameScreen({
           }
           winner={gs.winner === P2}
           pip={pip2}
+          onNameClick={profileNickFor(P2) ? () => setProfileNick(profileNickFor(P2)) : undefined}
         />
         {gs.winner && (
           <span style={{ color: theme.textHighlight, fontWeight: 'bold', fontSize: 16 }}>
@@ -642,6 +656,7 @@ export default function GameScreen({
           winner={gs.winner === P1}
           align="right"
           pip={pip1}
+          onNameClick={profileNickFor(P1) ? () => setProfileNick(profileNickFor(P1)) : undefined}
         />
       </div>
 
@@ -831,6 +846,8 @@ export default function GameScreen({
       <button onClick={() => { if (!isOnline) clearLocalGame(); onBack(); }} style={{ ...btnSmall, marginTop: 24 }}>
         Leave Game
       </button>
+
+      {profileNick && <StatsScreen nick={profileNick} onClose={() => setProfileNick(null)} />}
     </div>
   );
 }

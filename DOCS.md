@@ -347,6 +347,15 @@ On a game's end the finished game is recorded to the player's Firebase profile v
 - **Verified:** 86 unit tests green; a live Firebase integration test (vs-AI: a forced win wrote `totalGames:1, wins:1, delta:1, opponent:'AI'`; a second `forceWin` kept `totalGames:1` — fire-once; New Game + a second win recorded `totalGames:2` — back-to-back). 0 console errors. An adversarial review (2 agents) surfaced one critical-flagged finding (the back-to-back case) which the test proved already handled. Throwaway test nicks were deleted afterward so real `/players` stats stay clean.
 - **Scope note:** the React app currently has no resign/forfeit/timer/cube, so game-end = a normal bear-off win only; those other end types arrive with later sub-phases.
 
+### Phase 8.5c-1 — Player profile / stats overlay (done)
+
+Clicking a player's name in `GameScreen` opens **`screens/StatsScreen.jsx`** — a modal overlay showing that player's real Firebase stats (now populated by 8.5b). It reads `storage/playerStats` (`getPlayer` / `getMultiplayerScore` / `rankFromGames`) and follows devanture's `drawPlayerProfile` layout: name; a `(±N)` cumulative-score / `win%` / total-games / `#RANK` line; a "since `<firstPlay>`" date; and a recent-games table with `↑+N`/`↓-N` deltas (pastel-blue wins / burgundy losses), `YOU(score)`, the `P - O` result, opponent(score), and a date (`HH:MM` if <24h else `YY/MM/DD`). The score polyline chart is deferred (a later polish).
+
+- **Wiring:** `GameScreen` gets a `profileNick` state + `profileNickFor(slot)` (online → `matchData.players[slot]`; local/AI → the human's nick for P1; the AI/local-2P second seat → `null`, so its name isn't clickable). `PlayerTag` names become clickable (dotted underline) when a profile nick exists.
+- **Modal layering:** the overlay is `z-index: 100` so it sits above `BuildInfo`'s permanent `z-50` info icon (which otherwise pokes through the veil). Closes via backdrop click or the `×`; `data-testid="stats-overlay"` backs the verifier.
+- **Verified (Playwright):** seeded a Firebase profile → opened the overlay and read back the exact line (`(+3) 59% 87 games #NOVICE since 2025-09-01`) + 5 correctly-formatted rows; close via backdrop and `×` both work; 0 console errors. 86 unit tests green. Seeded test profile deleted afterward.
+- **Still pending in 8.5c:** restyle `LobbyScreen` to the GMMN look, merge `ModeSelect`/`BuildInfo`/About into a GMMN menu, theming reconciliation, and the score polyline chart.
+
 ---
 
 ## Devanture Skin (p5.js standalone preview)
