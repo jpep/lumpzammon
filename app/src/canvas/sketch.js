@@ -37,6 +37,8 @@ export function makeSketch(opts = {}) {
     height,
     showFrame = true,
     showMark = false,
+    showDice = true,
+    embedded = false,
     snapshot = STATIC_SNAPSHOT,
     live = false,
     onPickup,
@@ -49,7 +51,7 @@ export function makeSketch(opts = {}) {
     let C = null;
     let g = null;
     // Live view, replaced/merged via p.update(). gs is null in static mode.
-    let view = { snapshot, gs: null, sources: [], targets: [] };
+    let view = { snapshot, gs: null, sources: [], targets: [], direction: 0 };
     const drag = {
       active: false, fromPt: null, turnColor: 'white',
       mouseX: 0, mouseY: 0, dispX: 0, dispY: 0, snapPt: null, snapT: 0,
@@ -62,7 +64,7 @@ export function makeSketch(opts = {}) {
 
     p.setup = () => {
       p.createCanvas(width, height); // container size, NOT p.windowWidth
-      g = computeGeometry(width, height);
+      g = computeGeometry(width, height, embedded);
       const hue = extractDominantHue(bgImage);
       C = buildPalette(p, hue);
       p.noLoop(); // redraw-on-change; loop() only while dragging
@@ -77,7 +79,7 @@ export function makeSketch(opts = {}) {
         drawSourceHalo(p, g, C, view.sources, view.snapshot, drag.active ? drag.fromPt : null);
       }
       drawCheckers(p, g, C, view.snapshot, fontLarge, showMark);
-      if (view.gs) drawDice(p, g, C, view.gs);
+      if (showDice && view.gs) drawDice(p, g, C, view.gs, view.direction);
       if (drag.active) {
         drawTargetRing(p, g, C, view.targets, drag.snapPt, view.snapshot);
         const snapCount = drag.snapPt != null ? countAt(view.snapshot, drag.snapPt) : 0;
@@ -104,7 +106,7 @@ export function makeSketch(opts = {}) {
     p.resize = (w, h) => {
       if (!w || !h) return;
       p.resizeCanvas(w, h);
-      g = computeGeometry(w, h);
+      g = computeGeometry(w, h, embedded);
       p.redraw();
     };
 
@@ -128,7 +130,7 @@ export function makeSketch(opts = {}) {
         if (!drag.active) return;
         drag.mouseX = p.mouseX;
         drag.mouseY = p.mouseY;
-        drag.snapPt = resolveSnap(g, view.targets, view.snapshot.turn, p.mouseX, p.mouseY);
+        drag.snapPt = resolveSnap(g, view.targets, view.snapshot.turn, p.mouseX, p.mouseY, view.direction);
       };
       p.mouseReleased = () => {
         if (!drag.active) return;

@@ -12,7 +12,19 @@ export const MAX_STACK = 6;
 export const NAMES_W_A = 6;           // a-units reserved at the side in landscape
 export const BAR_CENTER_GAP_R = 1.5;  // half-gap (in r) left clear at the bar centre
 
-export function computeGeometry(cssW, cssH) {
+export function computeGeometry(cssW, cssH, embedded = false) {
+  // Embedded mode (canvas inside GameScreen's sized board box): the board fills
+  // the box, reserving only a small vertical margin (for the bear-off drop
+  // zone) — no title/dice/name headroom (GameScreen owns those in DOM).
+  if (embedded) {
+    const offMarginA = 1.0; // a-units reserved top+bottom for the off zone
+    const a = Math.min(cssW / 13, cssH / (13 + 2 * offMarginA));
+    const r = a / 2;
+    const bx = (cssW - 13 * a) / 2;
+    const by = (cssH - 13 * a) / 2;
+    return { a, r, bx, by, diceOnSide: false, cssW, cssH };
+  }
+
   const diceOnSide = cssW >= cssH * 1.1; // landscape => dice on the side
   let a;
   if (diceOnSide) {

@@ -21,20 +21,22 @@ const BALL_R_N = 0.064;
 const CLIP_INSET_N = 0.04;
 
 // Top-left of die `dieIdx` (0|1) for `player` ('white'|'black'). die side = 3.5r.
-// Portrait: a row below (white) / above (black) the board. Landscape: a vertical
-// column to the left of the board.
-export function getDiePos(g, player, dieIdx) {
+// The NEAR player (bottom of screen) gets the bottom dice row; under direction=1
+// (online P2 perspective) the near player is black, so the sides flip.
+export function getDiePos(g, player, dieIdx, direction = 0) {
   const ds = 3.5 * g.r;
+  const nearColor = direction === 1 ? 'black' : 'white';
+  const bottomForOwner = player === nearColor;
   if (g.diceOnSide) {
     const cx = g.bx - 2.75 * g.r;
     const x = cx - ds / 2;
     const cellH = ds + g.r;
     const yBase = g.by + 13 * g.a - ds;
-    const cell = player === 'white' ? (dieIdx === 1 ? 0 : 1) : (dieIdx === 1 ? 5 : 4);
+    const cell = bottomForOwner ? (dieIdx === 1 ? 0 : 1) : (dieIdx === 1 ? 5 : 4);
     return { x, y: yBase - cell * cellH };
   }
   const x = g.bx + dieIdx * (ds + g.r * 0.5);
-  return player === 'white'
+  return bottomForOwner
     ? { x, y: g.by + 13 * g.a + g.r * 1.6 }
     : { x, y: g.by - ds - g.r * 1.6 };
 }
@@ -88,12 +90,12 @@ export function diceFromGameState(gs) {
 }
 
 // Render the active player's two settled dice. Used die => 50% square + pips.
-export function drawDice(p, g, C, gs) {
+export function drawDice(p, g, C, gs, direction = 0) {
   if (!gs || !gs.dice || gs.dice.length === 0) return;
   const { owner, values, used } = diceFromGameState(gs);
   for (let i = 0; i < 2; i++) {
     if (values[i] == null) continue;
-    const pos = getDiePos(g, owner, i);
+    const pos = getDiePos(g, owner, i, direction);
     const sq = used[i] ? 0.5 : 1;
     drawDie(p, g, C, pos, values[i], sq, sq);
   }

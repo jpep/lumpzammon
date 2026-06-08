@@ -44,9 +44,12 @@ export function hitTestPickup(g, snapshot, turnColor, mx, my) {
 
 // Which legal target (render point, 0 == off) does the cursor snap to? Board
 // points snap within a horizontal band of width `a` (Y ignored, forgiving);
-// off snaps in the wide bear-off zone. Returns the render point or null.
-export function resolveSnap(g, targets, turnColor, mx, my) {
-  const isWhite = turnColor === 'white';
+// off snaps in the wide bear-off zone. Under direction=1 the near player is
+// black, so the bear-off zone is toward whichever edge the active player's home
+// sits on. Returns the render point or null.
+export function resolveSnap(g, targets, turnColor, mx, my, direction = 0) {
+  const nearColor = direction === 1 ? 'black' : 'white';
+  const bearTowardBottom = turnColor === nearColor;
   const boardTop = g.by;
   const boardBot = g.by + 13 * g.a;
   const boardL = g.bx;
@@ -58,11 +61,11 @@ export function resolveSnap(g, targets, turnColor, mx, my) {
       // Bear-off zone.
       let inOff = false;
       if (g.diceOnSide) {
-        if (mx > boardR) inOff = true;
-      } else if (isWhite ? my > boardBot : my < boardTop) {
+        if (mx > boardR) inOff = true; // landscape refinement deferred
+      } else if (bearTowardBottom ? my > boardBot : my < boardTop) {
         inOff = true;
       } else if (!inBoard) {
-        if (isWhite ? my > g.cssH / 2 : my < g.cssH / 2) inOff = true;
+        if (bearTowardBottom ? my > g.cssH / 2 : my < g.cssH / 2) inOff = true;
       }
       if (inOff) return 0;
     } else if (Math.abs(mx - ptCenterX(g, tpt)) <= g.a / 2) {

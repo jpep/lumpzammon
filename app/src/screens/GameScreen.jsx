@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Board from '../components/Board';
+import CanvasBoard from '../components/CanvasBoard';
 import Checker from '../components/Checker';
 import DiceFace from '../components/DiceFace';
 import { useTheme } from '../ThemeContext';
@@ -7,8 +8,13 @@ import {
   newGameState, rollDice, rollSingleDie, resolveOpening,
   getValidMoves, applyMove, checkWin, clone, calcPipCount, P1, P2
 } from '../game/logic';
+import { applyCombinedMove } from '../game/moveResolution';
 import { aiPlay } from '../game/ai';
 import { saveLocalGame, loadLocalGame, clearLocalGame } from '../storage/local';
+
+// Phase 8.5a: the p5 CanvasBoard is the default game board. Append ?dom (dev) to
+// fall back to the legacy DOM <Board> for A/B comparison.
+const USE_CANVAS_BOARD = true;
 
 // Pick a die to pre-select that actually has a legal move under the (rules-
 // filtered) getValidMoves — prefer natural dice order. Avoids pre-selecting a
@@ -108,6 +114,9 @@ export default function GameScreen({
   const theme = useTheme();
   const isOnline = mode === 'online';
   const isAI = mode === 'ai';
+  const useCanvas = USE_CANVAS_BOARD
+    && !(import.meta.env.DEV && typeof window !== 'undefined'
+      && new URLSearchParams(window.location.search).has('dom'));
 
   const [localState, setLocalState] = useState(() => {
     if (!isOnline) {
@@ -155,6 +164,9 @@ export default function GameScreen({
   const [animatingFrom, setAnimatingFrom] = useState(null);
   const [animatingPlayer, setAnimatingPlayer] = useState(null);
   const isAnimatingRef = useRef(false);
+  const canvasInstRef = useRef(null);
+  const gsRef = useRef(gs);
+  const handleCanvasReady = useCallback((inst) => { canvasInstRef.current = inst; }, []);
 
   useEffect(() => {
     const update = () => setBoardScale(calcScale());
@@ -456,6 +468,56 @@ export default function GameScreen({
     });
   };
 
+  // Post-move recipe shared by the canvas drag path (snap — no DOM tween).
+  // Mutates newGs (phase/turn/dice/moves/winner), updates selection, returns it.
+  const finishMove = (newGs, player) => {
+    const w = checkWin(newGs);
+    if (w) {
+      newGs.winner = w;
+      newGs.phase = 'done';
+      setSelectedDie(null);
+      setSelectedFrom(null);
+      return newGs;
+    }
+    const remaining = getValidMoves(newGs, player);
+    if (remaining.length === 0 || newGs.moves.length === 0) {
+      newGs.phase = 'roll';
+      newGs.turn = player === P1 ? P2 : P1;
+      newGs.dice = [];
+      newGs.moves = [];
+      setSelectedDie(null);
+    } else {
+      setSelectedDie(firstPlayableDie(newGs, player));
+    }
+    setSelectedFrom(null);
+    return newGs;
+  };
+
+  // Canvas drag commit: resolve a from->to (possibly combined, consuming 1..N
+  // dice in one gesture) and run the SAME end-turn/AI/online flow as a click
+  // move. Snap (no animation); guarded against the AI tween double-committing.
+  const handleCanvasMove = useCallback(({ f, t }) => {
+    if (isAnimatingRef.current) return;
+    if (!myTurn || gs.phase !== 'move') return;
+    if (isAI && currentPlayer === P2) return;
+    const moved = applyCombinedMove(gs, currentPlayer, f, t);
+    if (!moved) return; // illegal drop — ghost already snapped back, no commit
+    updateState(finishMove(moved, currentPlayer));
+  }, [gs, currentPlayer, myTurn, isAI, updateState]);
+
+  // DEV-only hook for the Playwright verifier (read engine state + canvas geom).
+  useEffect(() => { gsRef.current = gs; });
+  useEffect(() => {
+    if (!import.meta.env.DEV) return undefined;
+    window.__gs = {
+      getState: () => gsRef.current,
+      geom: () => canvasInstRef.current?.getGeom?.() || null,
+      direction: () => direction,
+      validMoves: () => getValidMoves(gsRef.current, gsRef.current.turn || P1),
+    };
+    return () => { window.__gs = undefined; };
+  }, [direction]);
+
   const handleNewGame = () => {
     const fresh = newGameState();
     updateState(fresh);
@@ -570,23 +632,36 @@ export default function GameScreen({
         <div style={{
           transform: `scale(${boardScale})`,
           transformOrigin: 'top center',
-          marginBottom: boardScale < 1 ? -(1 - boardScale) * 420 : 0,
+          marginBottom: boardScale < 1 ? -(1 - boardScale) * (useCanvas ? BOARD_WIDTH : 420) : 0,
           position: 'relative',
         }}>
-          <Board
-            gameState={gs}
-            validMoves={validMoves}
-            movableSources={movableSources}
-            selectedFrom={selectedFrom}
-            onClickChecker={handleClickChecker}
-            onClickPoint={handleClickPoint}
-            onClickBar={handleClickBar}
-            onClickOff={handleClickOff}
-            currentPlayer={currentPlayer}
-            animatingFrom={animatingFrom}
-            animatingPlayer={animatingPlayer}
-            direction={direction}
-          />
+          {useCanvas ? (
+            <div style={{ width: BOARD_WIDTH, height: BOARD_WIDTH }}>
+              <CanvasBoard
+                gameState={gs}
+                direction={direction}
+                interactive={myTurn && gs.phase === 'move' && !(isAI && currentPlayer === P2)}
+                onMove={handleCanvasMove}
+                onReady={handleCanvasReady}
+                showDice={false}
+              />
+            </div>
+          ) : (
+            <Board
+              gameState={gs}
+              validMoves={validMoves}
+              movableSources={movableSources}
+              selectedFrom={selectedFrom}
+              onClickChecker={handleClickChecker}
+              onClickPoint={handleClickPoint}
+              onClickBar={handleClickBar}
+              onClickOff={handleClickOff}
+              currentPlayer={currentPlayer}
+              animatingFrom={animatingFrom}
+              animatingPlayer={animatingPlayer}
+              direction={direction}
+            />
+          )}
           {passOverlay && (
             <div style={{
               position: 'absolute',
