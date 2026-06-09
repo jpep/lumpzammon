@@ -7,8 +7,9 @@ import DiceFace from '../components/DiceFace';
 import { useTheme } from '../ThemeContext';
 import {
   newGameState, rollDice, rollSingleDie, resolveOpening,
-  getValidMoves, applyMove, checkWin, clone, calcPipCount, P1, P2
+  getValidMoves, applyMove, checkWin, clone, calcPipCount, P1, P2, GAME_BANK
 } from '../game/logic';
+import useGameTimers from '../hooks/useGameTimers';
 import { applyCombinedMove } from '../game/moveResolution';
 import { gameEndResult } from '../game/gameResult';
 import { aiPlay, evaluate } from '../game/ai';
@@ -85,7 +86,13 @@ function CubeControl({ value, clickable, onClick, owner }) {
   );
 }
 
-function PlayerTag({ name, player, isYou, isTurn, action, winner, align, pip, onNameClick }) {
+// Format a seconds count as M:SS for the game-clock bank.
+function fmtClock(secs) {
+  const s = Math.max(0, Math.round(secs));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+
+function PlayerTag({ name, player, isYou, isTurn, action, winner, align, pip, onNameClick, bank, moveLeft }) {
   const theme = useTheme();
   const isRight = align === 'right';
   const actionStyle = {
@@ -112,6 +119,24 @@ function PlayerTag({ name, player, isYou, isTurn, action, winner, align, pip, on
   const sep = action && <span style={actionStyle}>—</span>;
   const act = action && <span style={actionStyle}>{action}</span>;
   const pipTag = pip != null && <span style={pipStyle}>pip {pip}</span>;
+  // Clock: the move timer counts (15→0) on the active player; once exhausted the
+  // bank (M:SS) drains and turns red. The bank reads as urgent below 30s.
+  const lowBank = bank != null && bank <= 30;
+  const clockTag = bank != null && (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', gap: 4,
+      fontVariantNumeric: 'tabular-nums', fontSize: 12,
+    }} data-testid={`clock-${player}`}>
+      {moveLeft != null && (
+        <span style={{
+          color: moveLeft <= 5 ? '#e0586a' : theme.textHighlight, fontWeight: 'bold',
+        }} data-testid={`move-clock-${player}`}>{moveLeft}s</span>
+      )}
+      <span style={{ color: lowBank ? '#e0586a' : theme.textSecondary, fontWeight: lowBank ? 'bold' : 'normal' }}>
+        ⏱{fmtClock(bank)}
+      </span>
+    </span>
+  );
 
   return (
     <div style={{
@@ -124,6 +149,7 @@ function PlayerTag({ name, player, isYou, isTurn, action, winner, align, pip, on
       {isRight && <>{act}{sep}</>}
       {isRight ? (
         <>
+          {clockTag}
           {pipTag}
           <span style={nameStyle} onClick={onNameClick || undefined}>{name}</span>
           {youTag}
@@ -135,6 +161,7 @@ function PlayerTag({ name, player, isYou, isTurn, action, winner, align, pip, on
           <span style={nameStyle} onClick={onNameClick || undefined}>{name}</span>
           {youTag}
           {pipTag}
+          {clockTag}
         </>
       )}
       {!isRight && <>{sep}{act}</>}
@@ -185,6 +212,8 @@ export default function GameScreen({
     // Doubling cube (Phase 8.5d): default for pre-cube matches / reconnects.
     cube: rawGs.cube || newCube(),
     cubeModal: rawGs.cubeModal || null,
+    // Chess-clock banks (Phase 8.5d-2): default for pre-clock matches / reconnects.
+    clock: rawGs.clock || { game: { 1: GAME_BANK, 2: GAME_BANK } },
   };
 
   const [selectedFrom, setSelectedFrom] = useState(null);
@@ -249,6 +278,21 @@ export default function GameScreen({
       setLocalState(newState);
     }
   }, [isOnline, onUpdateMatch]);
+
+  // Chess-clock timers (Phase 8.5d-2). The clock runs only in roll+move; the cube
+  // handshake, animations, opening, pass and done are paused. Only the on-turn
+  // device runs the live countdown / forfeit (single authoritative writer).
+  const isActivePhase = gs.phase === 'roll' || gs.phase === 'move';
+  const clockPaused = !!gs.cubeModal || isAnimatingRef.current || !isActivePhase;
+  const timers = useGameTimers({
+    bank: gs.clock?.game,
+    currentPlayer,
+    myTurn,
+    isActivePhase,
+    paused: clockPaused,
+    winner: gs.winner,
+  });
+  const { foldClock, resetTimers } = { foldClock: timers.foldClock, resetTimers: timers.reset };
 
   const getElementCenter = (selector) => {
     const el = document.querySelector(selector);
@@ -384,6 +428,7 @@ export default function GameScreen({
         passGs.turn = passGs.turn === P1 ? P2 : P1;
         passGs.dice = [];
         passGs.moves = [];
+        passGs.clock = foldClock(passGs, currentPlayer); // bank the passing turn
         updateState(passGs);
       }, 1500);
       setTimeout(() => setPassOverlay(null), 2000);
@@ -391,7 +436,7 @@ export default function GameScreen({
       setSelectedDie(firstPlayableDie(newGs, newGs.turn));
       updateState(newGs);
     }
-  }, [gs, currentPlayer, myTurn, isOnline, updateState]);
+  }, [gs, currentPlayer, myTurn, isOnline, updateState, foldClock]);
 
   // AI turn — apply one move at a time with animation
   useEffect(() => {
@@ -409,6 +454,7 @@ export default function GameScreen({
           newGs.turn = P1;
           newGs.dice = [];
           newGs.moves = [];
+          newGs.clock = foldClock(newGs, P2);
           updateState(newGs);
         }, 1500);
         setTimeout(() => setPassOverlay(null), 2000);
@@ -430,6 +476,7 @@ export default function GameScreen({
             newGs.turn = P1;
             newGs.dice = [];
             newGs.moves = [];
+            newGs.clock = foldClock(newGs, P2); // bank the AI's turn
           }
         }
 
@@ -438,7 +485,7 @@ export default function GameScreen({
       });
     }, 750);
     return () => clearTimeout(timer);
-  }, [isAI, currentPlayer, gs, updateState, animateAndExecute]);
+  }, [isAI, currentPlayer, gs, updateState, animateAndExecute, foldClock]);
 
   // AI auto-roll
   useEffect(() => {
@@ -505,6 +552,7 @@ export default function GameScreen({
         newGs.turn = currentPlayer === P1 ? P2 : P1;
         newGs.dice = [];
         newGs.moves = [];
+        newGs.clock = foldClock(newGs, currentPlayer); // bank the finished turn
         setSelectedDie(null);
       } else {
         setSelectedDie(firstPlayableDie(newGs, currentPlayer));
@@ -533,6 +581,7 @@ export default function GameScreen({
       newGs.turn = player === P1 ? P2 : P1;
       newGs.dice = [];
       newGs.moves = [];
+      newGs.clock = foldClock(newGs, player); // bank the finished turn
       setSelectedDie(null);
     } else {
       setSelectedDie(firstPlayableDie(newGs, player));
@@ -630,6 +679,20 @@ export default function GameScreen({
     return () => clearTimeout(t);
   }, [isAI, gs.cubeModal?.type, gs.cubeModal?.player, gs.winner, updateState]);
 
+  // Clock forfeit (Phase 8.5d-2). Only the on-turn device commits it (single
+  // authoritative writer); guarded so it never races a just-committed win/decline
+  // and never fires outside an active phase. Opponent wins simple x cube value.
+  useEffect(() => {
+    if (!timers.expired) return;
+    if (gs.winner || gs.endReason) return;
+    if (!(gs.phase === 'roll' || gs.phase === 'move')) return;
+    const opp = currentPlayer === P1 ? P2 : P1;
+    updateState({
+      ...gs, clock: foldClock(gs, currentPlayer),
+      winner: opp, phase: 'done', endReason: 'forfeit',
+    });
+  }, [timers.expired]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Record the finished game to the player's Firebase stats profile, once per
   // game end. Skips local 2P (ambiguous identity) and missing nick. Online: both
   // clients fire, each recording for its own nick (no per-nick double-record).
@@ -665,6 +728,10 @@ export default function GameScreen({
       rollPhase: (player) => {
         updateState({ ...gsRef.current, turn: player, phase: 'roll', dice: [], moves: [] });
       },
+      // Clock hooks for the timer verifier: read banks + backdate the turn so the
+      // bank drains to a forfeit on the next tick (no waiting real seconds).
+      clock: () => gsRef.current.clock,
+      ageClock: (secs) => timers.debugAge(secs),
       // Cube hooks for the doubling-cube verifier (read state + drive handshake
       // programmatically so a test doesn't depend on canvas/DOM hit-testing).
       cube: () => gsRef.current.cube,
@@ -716,6 +783,7 @@ export default function GameScreen({
     setAnimatingFrom(null);
     setAnimatingPlayer(null);
     isAnimatingRef.current = false;
+    resetTimers(); // clear the clock baseline so game 2's first turn starts fresh
     if (!isAI) setLocalDirection(d => d === 0 ? 1 : 0);
   };
 
@@ -802,6 +870,16 @@ export default function GameScreen({
   const cubeSub = { fontSize: 14, color: theme.textSecondary, marginTop: 10, lineHeight: 1.4 };
   const cubeBtnRow = { display: 'flex', gap: 12, justifyContent: 'center', marginTop: 20 };
 
+  // ── Clock render state ─────────────────────────────────────────────────────
+  // Only THIS device's on-turn player gets the live countdown; everyone else
+  // (and every off-turn player) shows the static synced bank. Hidden in opening.
+  const showClock = gs.phase !== 'opening';
+  const liveFor = (p) => p === currentPlayer && myTurn && isActivePhase && !gs.winner;
+  const bankFor = (p) => (liveFor(p)
+    ? Math.max(0, Math.ceil(timers.gameRemaining))
+    : (gs.clock?.game?.[p] ?? GAME_BANK));
+  const moveLeftFor = (p) => (liveFor(p) ? Math.ceil(timers.moveRemaining) : null);
+
   return (
     <div style={containerStyle}>
       {/* Status bar */}
@@ -818,6 +896,8 @@ export default function GameScreen({
           }
           winner={gs.winner === P2}
           pip={pip2}
+          bank={showClock ? bankFor(P2) : null}
+          moveLeft={showClock ? moveLeftFor(P2) : null}
           onNameClick={profileNickFor(P2) ? () => setProfileNick(profileNickFor(P2)) : undefined}
         />
         {gs.winner && (
@@ -838,6 +918,8 @@ export default function GameScreen({
           winner={gs.winner === P1}
           align="right"
           pip={pip1}
+          bank={showClock ? bankFor(P1) : null}
+          moveLeft={showClock ? moveLeftFor(P1) : null}
           onNameClick={profileNickFor(P1) ? () => setProfileNick(profileNickFor(P1)) : undefined}
         />
       </div>

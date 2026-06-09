@@ -108,3 +108,23 @@ describe('gameEndResult — declined double', () => {
     expect(r).toMatchObject({ didWin: true, delta: 2, youScore: 2 }); // 1 (simple) x 2 (cube)
   });
 });
+
+describe('gameEndResult — clock forfeit', () => {
+  it('is a simple win x cube value regardless of the board', () => {
+    // Mid-game board (would be neither gammon nor backgammon); a forfeit is a
+    // simple win worth the cube value.
+    const s = st({ off: { 1: 1, 2: 1 }, winner: P2, endReason: 'forfeit', cube: { value: 2, owner: 'white', promised: null, used: { white: true, black: false } } });
+    s.pts[5] = { n: 14, p: P1 };
+    s.pts[18] = { n: 14, p: P2 };
+    // P1 timed out; online P1 client records a loss of 1 x 2 = 2.
+    const r = gameEndResult({ gs: s, winner: P2, isOnline: true, playerSlot: P1, opponentName: 'bob' });
+    expect(r).toMatchObject({ didWin: false, delta: -2, oppScore: 2, opponent: 'bob' });
+  });
+  it('forfeit at cube ×1 is a single point', () => {
+    const s = st({ off: { 1: 5, 2: 0 }, winner: P1, endReason: 'forfeit' });
+    s.pts[10] = { n: 10, p: P1 };
+    s.pts[11] = { n: 15, p: P2 };
+    const r = gameEndResult({ gs: s, winner: P1, isAI: true });
+    expect(r).toMatchObject({ didWin: true, delta: 1, youScore: 1 });
+  });
+});

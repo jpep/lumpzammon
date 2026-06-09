@@ -3,6 +3,12 @@ import { newCube } from './cube';
 export const P1 = 1;
 export const P2 = 2;
 
+// Chess-clock timers (Phase 8.5d-2). Each turn gets MOVE_ALLOWANCE seconds free;
+// time spent beyond that drains the player's GAME_BANK; an empty bank forfeits.
+// (devanture's "move = 15s, game = 119s" values.)
+export const MOVE_ALLOWANCE = 15;
+export const GAME_BANK = 119;
+
 export const TOP_IDX = [12,13,14,15,16,17,null,18,19,20,21,22,23];
 export const BOT_IDX = [11,10,9,8,7,6,null,5,4,3,2,1,0];
 
@@ -37,6 +43,9 @@ export function newGameState() {
     // it. cubeModal carries the in-flight offer/accept handshake (null = none).
     cube: newCube(),
     cubeModal: null,
+    // Chess-clock banks (Phase 8.5d-2). Per-player seconds remaining; only the
+    // on-turn client decrements its own bank (folded into the turn-flip write).
+    clock: { game: { 1: GAME_BANK, 2: GAME_BANK } },
   };
 }
 

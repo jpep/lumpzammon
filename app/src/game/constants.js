@@ -1,7 +1,7 @@
 // Shared constants — single source of truth so they can't drift across files.
 
-// Player identities, re-exported from the rules engine.
-export { P1, P2 } from './logic';
+// Player identities + clock budgets, re-exported from the rules engine.
+export { P1, P2, MOVE_ALLOWANCE, GAME_BANK } from './logic';
 
 // Storage key prefixes (localStorage + Realtime DB). These were duplicated as
 // string literals across the online/lobby/session/persistence code; centralize
