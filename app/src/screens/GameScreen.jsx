@@ -462,7 +462,7 @@ export default function GameScreen({
       }
 
       isAnimatingRef.current = true;
-      animateAndExecute(seq[0], P2, () => {
+      const commit = () => {
         const newGs = applyMove(gs, P2, seq[0]);
 
         const remaining = getValidMoves(newGs, P2);
@@ -482,10 +482,15 @@ export default function GameScreen({
 
         updateState(newGs);
         isAnimatingRef.current = false;
-      });
+      };
+      // Canvas: slide the checker (no DOM [data-point-id] to tween). DOM board:
+      // the legacy flying-checker overlay.
+      const inst = canvasInstRef.current;
+      if (useCanvas && inst && inst.animateMove) inst.animateMove(seq[0], false, commit);
+      else animateAndExecute(seq[0], P2, commit);
     }, 750);
     return () => clearTimeout(timer);
-  }, [isAI, currentPlayer, gs, updateState, animateAndExecute, foldClock]);
+  }, [isAI, currentPlayer, gs, updateState, animateAndExecute, foldClock, useCanvas]);
 
   // AI auto-roll
   useEffect(() => {

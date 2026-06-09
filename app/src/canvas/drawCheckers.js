@@ -64,13 +64,19 @@ export function drawStackOnPoint(p, g, C, pt, count, isWhite, font, showMark) {
   }
 }
 
-export function drawCheckers(p, g, C, state, font, showMark) {
+// hideFrom (optional): hide ONE checker at this source while it's mid-flight — a
+// render point number (hides that point's top checker) or 'bar:white'/'bar:black'.
+export function drawCheckers(p, g, C, state, font, showMark, hideFrom = null) {
   for (let pt = 1; pt <= 24; pt++) {
-    const v = state.points[pt];
+    let v = state.points[pt];
     if (!v) continue;
-    drawStackOnPoint(p, g, C, pt, Math.abs(v), v > 0, font, showMark);
+    let count = Math.abs(v);
+    if (hideFrom === pt) count -= 1; // the top checker is flying
+    if (count > 0) drawStackOnPoint(p, g, C, pt, count, v > 0, font, showMark);
   }
   const bcx = barCenterX(g);
-  for (let i = 0; i < state.bar.white; i++) drawChecker(p, g, C, bcx, barPieceCY(g, true, i), true);
-  for (let i = 0; i < state.bar.black; i++) drawChecker(p, g, C, bcx, barPieceCY(g, false, i), false);
+  const barW = state.bar.white - (hideFrom === 'bar:white' ? 1 : 0);
+  const barB = state.bar.black - (hideFrom === 'bar:black' ? 1 : 0);
+  for (let i = 0; i < barW; i++) drawChecker(p, g, C, bcx, barPieceCY(g, true, i), true);
+  for (let i = 0; i < barB; i++) drawChecker(p, g, C, bcx, barPieceCY(g, false, i), false);
 }

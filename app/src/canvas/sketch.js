@@ -16,6 +16,8 @@ import { drawBoard } from './drawBoard';
 import { drawCheckers } from './drawCheckers';
 import { drawMessageVeil, drawIntroFrame, drawGommanHollow } from './drawFrame';
 import { createDiceAnimator } from './diceAnim';
+import { createFlyAnimator } from './flyAnim';
+import { drawOffTrays } from './drawOff';
 import { hitTestPickup, resolveSnap, updateDragDisplay, drawDraggedChecker } from './interaction';
 import { drawSourceHalo, drawTargetRing } from './highlights';
 import { countAt } from './adapter';
@@ -60,6 +62,8 @@ export function makeSketch(opts = {}) {
     // update() tell a fresh roll (start the bounce) from a mere moves-change.
     const diceAnimator = createDiceAnimator();
     let lastDiceKey = null;
+    // Flying-checker animation (8.5e-2) for non-drag (AI) moves.
+    const flyAnimator = createFlyAnimator();
 
     // Detect a new roll in the incoming state and (re)start the bounce. Keyed on
     // (turn + dice values) so consuming a die — which changes gs.moves, not
@@ -96,11 +100,13 @@ export function makeSketch(opts = {}) {
       if (view.sources && view.sources.length) {
         drawSourceHalo(p, g, C, view.sources, view.snapshot, drag.active ? drag.fromPt : null);
       }
-      drawCheckers(p, g, C, view.snapshot, fontLarge, showMark);
+      drawCheckers(p, g, C, view.snapshot, fontLarge, showMark, flyAnimator.hideFrom());
+      drawOffTrays(p, g, C, view.snapshot, view.direction);
       if (showDice && view.gs) {
         diceAnimator.update();
         diceAnimator.draw(p, g, C, view.gs, view.direction);
       }
+      if (flyAnimator.isActive()) flyAnimator.step(p, g, C);
       if (drag.active) {
         drawTargetRing(p, g, C, view.targets, drag.snapPt, view.snapshot);
         const snapCount = drag.snapPt != null ? countAt(view.snapshot, drag.snapPt) : 0;
@@ -112,9 +118,9 @@ export function makeSketch(opts = {}) {
         drawIntroFrame(p, g, 1);
         drawGommanHollow(p, g, 1);
       }
-      // Stop the render loop once nothing is animating (drag or dice). redraw()
-      // from update() repaints idle changes; loop() runs only during motion.
-      if (!drag.active && !diceAnimator.isAnimating()) p.noLoop();
+      // Stop the render loop once nothing is animating (drag / dice / fly).
+      // redraw() from update() repaints idle changes; loop() runs only in motion.
+      if (!drag.active && !diceAnimator.isAnimating() && !flyAnimator.isActive()) p.noLoop();
     };
 
     // Push new live state/highlights from React. Redraw unless mid-drag (the
@@ -122,8 +128,17 @@ export function makeSketch(opts = {}) {
     p.update = (next) => {
       view = { ...view, ...next };
       if (showDice) syncDice(view.gs);
-      // Mid-drag or mid-roll the loop already repaints; otherwise redraw once.
-      if (!drag.active && !diceAnimator.isAnimating()) p.redraw();
+      // Mid-drag/roll/fly the loop already repaints; otherwise redraw once.
+      if (!drag.active && !diceAnimator.isAnimating() && !flyAnimator.isActive()) p.redraw();
+    };
+
+    // Slide a checker for an ENGINE move ({ f, t }); `onDone` is the commit (the
+    // caller applies the move to the engine when the slide lands). Used for AI
+    // moves so they don't teleport. Snapshot/direction read from the live view.
+    p.animateMove = (move, isWhite, onDone) => {
+      if (!g || !view.snapshot) { if (onDone) onDone(); return; }
+      flyAnimator.start(g, view.snapshot, move, isWhite, view.direction, onDone);
+      p.loop();
     };
 
     // Expose the resolved geometry (for the DEV test hook to compute pixels).

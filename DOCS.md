@@ -404,7 +404,17 @@ The dice now **roll** on the canvas instead of appearing instantly. `canvas/dice
 - **`canvas/sketch.js`** — holds the animator + a `lastDiceKey`. `update()` calls `syncDice(gs)`, which starts a fresh bounce **only** when the roll itself changes (key = `turn + dice values`, so consuming a die — which changes `gs.moves`, not `gs.dice` — does not retrigger). It `loop()`s while animating and `noLoop()`s back to idle when neither a drag nor a roll is in motion (the idle redraw path is unchanged).
 - **`GameScreen.jsx`** — the canvas board now renders with `showDice`; the legacy DOM turn-dice faces are hidden when on the canvas (kept for the `?dom` fallback + the opening-roll display).
 - **Verified (Playwright):** the canvas pixels **change frame-to-frame during the roll** then **settle to a stable image** (the render loop stops when idle); double and non-double rolls; the `?dom` fallback still shows DOM dice; single canvas (StrictMode-safe); 0 console errors; 94 unit tests; build clean.
-- **Deferred to 8.5e-2:** canvas-native flying-checker/board-fill animation (moves still snap), bear-off **tray** rendering, landscape off-zone refinement, opening-roll dice-tap + animating the opening dice, optional bar-half perspective flip.
+
+### Phase 8.5e-2 — Flying-checker animation + bear-off trays (done)
+
+**AI moves no longer teleport** on the canvas, and **borne-off checkers are shown** in trays.
+
+- **`canvas/flyAnim.js`** — `createFlyAnimator()` slides a checker from its source to its destination with smoothstep easing (~20 frames). It's given an ENGINE move `{ f, t }`, resolves pixel endpoints from the **current (pre-move)** snapshot + geometry (handles `bar` source / `off` destination, and a hit lands at slot 0), and **hides the source checker** mid-flight via `drawCheckers`' new `hideFrom` param. On the final frame it draws the checker at the destination (anti-flicker) then fires `onDone` — the caller's commit. The human drag already provides motion, so this is driven only for the AI's moves.
+- **`canvas/sketch.js`** — exposes `p.animateMove(move, isWhite, onDone)` (starts the fly from the live `view.snapshot` + `view.direction` and `loop()`s); the render loop now stops only when nothing is animating (drag **or** dice **or** fly).
+- **`GameScreen.jsx`** — the AI-turn effect calls `canvasInstRef.current.animateMove(seq[0], false, commit)` on the canvas board (the DOM `animateAndExecute` stays for `?dom`); `commit` is the existing apply-move/end-turn/`foldClock` recipe.
+- **`canvas/drawOff.js`** — `drawOffTrays()` renders the borne-off checkers as stacked flattened bars in the board's **right gutter** (the embedded square leaves a ~`bx`-wide margin there, since `a` is height-limited). The near player's tray sits at the bottom, the far player's at the top (perspective-aware via `direction`), each capped at 15 with a count label. `offSlotCenter()` doubles as the landing point for a bear-off fly.
+- **Verified (Playwright):** the AI checker **slides** (canvas pixels animate in a burst captured *after* the dice settle, isolating the fly from the roll); the AI turn completes and control returns to P1; the **bear-off trays render** when off counts appear (canvas changes vs the empty-tray baseline); 0 console errors; 94 unit tests; build clean.
+- **Deferred to 8.5e-3:** online-opponent move animation (needs a state diff), landscape off-zone refinement, opening-roll dice-tap + animating the opening dice, optional bar-half perspective flip, hit-to-bar fly highlight.
 
 ---
 
