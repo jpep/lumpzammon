@@ -978,6 +978,7 @@ export default function GameScreen({
                 onReady={handleCanvasReady}
                 onRoll={onRollTap}
                 canRoll={canRollTap}
+                animateRemoteMoves={isOnline}
                 showDice
               />
             </div>

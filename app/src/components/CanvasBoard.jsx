@@ -17,6 +17,7 @@ import { makeSketch } from '../canvas/sketch';
 import {
   toSnapshot, renderToEngineFrom, renderToEngineTo, engineToRenderPt,
 } from '../canvas/adapter';
+import { diffMove } from '../canvas/flyAnim';
 import nort100Url from '../assets/nortechico-100.otf?url';
 import { getValidMoves } from '../game/logic';
 import { collectTargets } from '../game/moveResolution';
@@ -29,6 +30,7 @@ export default function CanvasBoard({
   onReady,
   onRoll,
   canRoll = false,
+  animateRemoteMoves = false,
   showFrame = false,
   showMark = false,
   showDice = true,
@@ -134,14 +136,29 @@ export default function CanvasBoard({
     };
   }, [showFrame, showMark, showDice, embedded, buildView, handlePickup, handleMove, handleRoll, onReady]);
 
-  // State sync: push the new view on every gameState/direction/interactive/canRoll change.
+  // State sync: push the new view on every gameState/direction/interactive/canRoll
+  // change. Online: if the change is the OPPONENT's single move (mover wasn't me),
+  // slide it instead of teleporting (the new state is held back until it lands).
   useEffect(() => {
+    const prevGs = gsRef.current;
     gsRef.current = gameState;
     dirRef.current = direction;
     interactiveRef.current = interactive;
     canRollRef.current = canRoll;
-    instRef.current?.update(buildView(gameState, direction, interactive, canRoll));
-  }, [gameState, direction, interactive, canRoll, buildView]);
+    const inst = instRef.current;
+    if (!inst) return;
+    const newView = buildView(gameState, direction, interactive, canRoll);
+    if (animateRemoteMoves && prevGs && !inst.isFlying?.()) {
+      const me = direction === 1 ? 2 : 1; // online: P2 sees direction 1
+      const mv = diffMove(prevGs, gameState);
+      if (mv && mv.mover !== me) {
+        inst.animateRemoteMove({ f: mv.f, t: mv.t }, mv.mover === 1, newView);
+        return;
+      }
+    }
+    if (inst.isFlying?.()) inst.cancelFly?.(); // a newer state superseded a fly
+    inst.update(newView);
+  }, [gameState, direction, interactive, canRoll, buildView, animateRemoteMoves]);
 
   return <div ref={ref} style={{ width: '100%', height: '100%', position: 'relative' }} />;
 }

@@ -15,6 +15,36 @@ import { offSlotCenter } from './drawOff';
 
 const FLY_FRAMES = 20; // ~0.33s at 60fps
 
+// Infer a single checker move from a pre/post ENGINE state pair (for animating a
+// remote/online opponent move, which arrives as a whole new synced state). The
+// mover is whoever was on turn in `prev`. Returns { f, t, mover } in ENGINE
+// coords (f/t are an index 0-23, or 'bar'/'off'), or null when the diff isn't a
+// clean single move (cube change, roll, multi-step combined hop, etc.) — the
+// caller then just snaps to the new state instead of animating.
+export function diffMove(prev, next) {
+  if (!prev || !next || !prev.pts || !next.pts) return null;
+  const mover = prev.turn;
+  if (mover !== 1 && mover !== 2) return null;
+  const cnt = (cell) => (cell && cell.p === mover ? cell.n : 0);
+  let from = null;
+  let to = null;
+  for (let i = 0; i < 24; i++) {
+    const d = cnt(next.pts[i]) - cnt(prev.pts[i]);
+    if (d === 0) continue;
+    if (d === -1 && from === null) from = i;
+    else if (d === 1 && to === null) to = i;
+    else return null; // ambiguous / not a single move
+  }
+  const barD = ((next.bar && next.bar[mover]) || 0) - ((prev.bar && prev.bar[mover]) || 0);
+  if (barD === -1) { if (from !== null) return null; from = 'bar'; }
+  else if (barD !== 0) return null;
+  const offD = ((next.off && next.off[mover]) || 0) - ((prev.off && prev.off[mover]) || 0);
+  if (offD === 1) { if (to !== null) return null; to = 'off'; }
+  else if (offD !== 0) return null;
+  if (from === null || to === null) return null;
+  return { f: from, t: to, mover };
+}
+
 function sourceXY(g, snapshot, fromEngine, isWhite, direction) {
   if (fromEngine === 'bar') {
     const n = isWhite ? snapshot.bar.white : snapshot.bar.black;
@@ -77,6 +107,8 @@ export function createFlyAnimator() {
 
   const isActive = () => active;
   const hideFrom = () => (active ? hideKeys : null);
+  // Abort without firing onDone (a newer state superseded this fly).
+  const cancel = () => { active = false; onDone = null; };
 
   // Advance one frame and draw the flying checker(s). On the last frame it draws
   // them at their destinations (anti-flicker) then fires onDone (the commit).
@@ -101,5 +133,5 @@ export function createFlyAnimator() {
     }
   }
 
-  return { start, isActive, hideFrom, step };
+  return { start, isActive, hideFrom, cancel, step };
 }

@@ -65,6 +65,9 @@ export function makeSketch(opts = {}) {
     let lastDiceKey = null;
     // Flying-checker animation (8.5e-2) for non-drag (AI) moves.
     const flyAnimator = createFlyAnimator();
+    // For a remote (online) move the new state already exists; we keep rendering
+    // the PRE-move view during the fly and swap to this once it lands (8.5e-4).
+    let pendingSwap = null;
 
     // Detect a new roll in the incoming state and (re)start the bounce. Keyed on
     // (turn + dice values) so consuming a die — which changes gs.moves, not
@@ -119,9 +122,15 @@ export function makeSketch(opts = {}) {
         drawIntroFrame(p, g, 1);
         drawGommanHollow(p, g, 1);
       }
-      // Stop the render loop once nothing is animating (drag / dice / fly).
-      // redraw() from update() repaints idle changes; loop() runs only in motion.
-      if (!drag.active && !diceAnimator.isAnimating() && !flyAnimator.isActive()) p.noLoop();
+      // After a remote fly lands, swap to the post-move view and let ONE more
+      // frame render it before stopping (so the board isn't left at pre-move).
+      if (!flyAnimator.isActive() && pendingSwap) {
+        view = pendingSwap;
+        pendingSwap = null;
+      } else if (!drag.active && !diceAnimator.isAnimating() && !flyAnimator.isActive()) {
+        // Stop the render loop once nothing is animating (drag / dice / fly).
+        p.noLoop();
+      }
     };
 
     // Push new live state/highlights from React. Redraw unless mid-drag (the
@@ -141,6 +150,16 @@ export function makeSketch(opts = {}) {
       flyAnimator.start(g, view.snapshot, move, isWhite, view.direction, onDone);
       p.loop();
     };
+
+    // Animate a REMOTE (online opponent) move whose new state already exists:
+    // slide over the current PRE-move view, then swap to `pendingView` on land.
+    p.animateRemoteMove = (move, isWhite, pendingView) => {
+      if (!g || !view.snapshot) { view = pendingView; p.redraw(); return; }
+      flyAnimator.start(g, view.snapshot, move, isWhite, view.direction, () => { pendingSwap = pendingView; });
+      p.loop();
+    };
+    p.isFlying = () => flyAnimator.isActive();
+    p.cancelFly = () => flyAnimator.cancel();
 
     // Expose the resolved geometry (for the DEV test hook to compute pixels).
     p.getGeom = () => g;
