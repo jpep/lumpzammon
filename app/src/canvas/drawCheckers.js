@@ -64,19 +64,21 @@ export function drawStackOnPoint(p, g, C, pt, count, isWhite, font, showMark) {
   }
 }
 
-// hideFrom (optional): hide ONE checker at this source while it's mid-flight — a
+// hide (optional): checkers mid-flight to omit — a key or array of keys, each a
 // render point number (hides that point's top checker) or 'bar:white'/'bar:black'.
-export function drawCheckers(p, g, C, state, font, showMark, hideFrom = null) {
+// A hitting fly hides both its source AND the bumped blot.
+export function drawCheckers(p, g, C, state, font, showMark, hide = null) {
+  const keys = hide == null ? [] : (Array.isArray(hide) ? hide : [hide]);
+  const nHidden = (key) => keys.reduce((n, k) => n + (k === key ? 1 : 0), 0);
   for (let pt = 1; pt <= 24; pt++) {
-    let v = state.points[pt];
+    const v = state.points[pt];
     if (!v) continue;
-    let count = Math.abs(v);
-    if (hideFrom === pt) count -= 1; // the top checker is flying
+    const count = Math.abs(v) - nHidden(pt);
     if (count > 0) drawStackOnPoint(p, g, C, pt, count, v > 0, font, showMark);
   }
   const bcx = barCenterX(g);
-  const barW = state.bar.white - (hideFrom === 'bar:white' ? 1 : 0);
-  const barB = state.bar.black - (hideFrom === 'bar:black' ? 1 : 0);
+  const barW = state.bar.white - nHidden('bar:white');
+  const barB = state.bar.black - nHidden('bar:black');
   for (let i = 0; i < barW; i++) drawChecker(p, g, C, bcx, barPieceCY(g, true, i), true);
   for (let i = 0; i < barB; i++) drawChecker(p, g, C, bcx, barPieceCY(g, false, i), false);
 }

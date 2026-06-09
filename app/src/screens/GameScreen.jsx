@@ -737,6 +737,9 @@ export default function GameScreen({
       // bank drains to a forfeit on the next tick (no waiting real seconds).
       clock: () => gsRef.current.clock,
       ageClock: (secs) => timers.debugAge(secs),
+      // Merge an arbitrary partial into the state (verifier board setup, e.g. a
+      // hit scenario for the flying-checker test).
+      poke: (partial) => updateState({ ...gsRef.current, ...partial }),
       // Cube hooks for the doubling-cube verifier (read state + drive handshake
       // programmatically so a test doesn't depend on canvas/DOM hit-testing).
       cube: () => gsRef.current.cube,
@@ -885,6 +888,25 @@ export default function GameScreen({
     : (gs.clock?.game?.[p] ?? GAME_BANK));
   const moveLeftFor = (p) => (liveFor(p) ? Math.ceil(timers.moveRemaining) : null);
 
+  // ── Tap-to-roll (8.5e-3) ───────────────────────────────────────────────────
+  // A tap on the canvas board rolls when a Roll button would be active for me —
+  // the regular roll phase or my pending opening roll. The handlers no-op if the
+  // tap is ill-timed, so the gate just mirrors the button visibility.
+  const bothOpeningRolled = gs.openingRolls[P1] > 0 && gs.openingRolls[P2] > 0;
+  const openingRollPending = gs.phase === 'opening' && !bothOpeningRolled && (
+    isOnline ? gs.openingRolls[playerSlot] === 0
+      : isAI ? gs.openingRolls[P1] === 0
+        : (gs.openingRolls[P1] === 0 || gs.openingRolls[P2] === 0)
+  );
+  const canRollTap = !gs.winner && (
+    (gs.phase === 'roll' && myTurn && !gs.cubeModal && !(isAI && currentPlayer === P2))
+    || openingRollPending
+  );
+  const onRollTap = () => {
+    if (gs.phase === 'opening') handleOpeningRoll();
+    else if (gs.phase === 'roll') handleRoll();
+  };
+
   return (
     <div style={containerStyle}>
       {/* Status bar */}
@@ -954,6 +976,8 @@ export default function GameScreen({
                 interactive={myTurn && gs.phase === 'move' && !(isAI && currentPlayer === P2)}
                 onMove={handleCanvasMove}
                 onReady={handleCanvasReady}
+                onRoll={onRollTap}
+                canRoll={canRollTap}
                 showDice
               />
             </div>

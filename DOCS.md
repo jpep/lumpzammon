@@ -414,7 +414,14 @@ The dice now **roll** on the canvas instead of appearing instantly. `canvas/dice
 - **`GameScreen.jsx`** — the AI-turn effect calls `canvasInstRef.current.animateMove(seq[0], false, commit)` on the canvas board (the DOM `animateAndExecute` stays for `?dom`); `commit` is the existing apply-move/end-turn/`foldClock` recipe.
 - **`canvas/drawOff.js`** — `drawOffTrays()` renders the borne-off checkers as stacked flattened bars in the board's **right gutter** (the embedded square leaves a ~`bx`-wide margin there, since `a` is height-limited). The near player's tray sits at the bottom, the far player's at the top (perspective-aware via `direction`), each capped at 15 with a count label. `offSlotCenter()` doubles as the landing point for a bear-off fly.
 - **Verified (Playwright):** the AI checker **slides** (canvas pixels animate in a burst captured *after* the dice settle, isolating the fly from the roll); the AI turn completes and control returns to P1; the **bear-off trays render** when off counts appear (canvas changes vs the empty-tray baseline); 0 console errors; 94 unit tests; build clean.
-- **Deferred to 8.5e-3:** online-opponent move animation (needs a state diff), landscape off-zone refinement, opening-roll dice-tap + animating the opening dice, optional bar-half perspective flip, hit-to-bar fly highlight.
+
+### Phase 8.5e-3 — Hit-to-bar fly + tap-to-roll (done)
+
+- **Hit-to-bar fly.** When a fly's destination holds a lone opposing blot, `flyAnim.js` slides the bumped checker from that point to the bar **concurrently** with the mover (a second fly), and hides BOTH the source and the blot mid-flight. `drawCheckers`' `hide` param now accepts an array of keys (render-point numbers / `'bar:white'` / `'bar:black'`), each subtracting one checker. So an AI hit reads as one checker sliding in while the bumped one slides out to the bar.
+- **Tap-to-roll.** A tap on the canvas board rolls the dice when a Roll button would be active for you — both the regular roll phase **and** your pending opening roll. `sketch.js` takes an `onRoll` opt + a `view.canRoll` flag and, in `mousePressed`, rolls before any pickup (canRoll is only set in roll/opening phases, so it never shadows a move drag). `CanvasBoard` threads `onRoll` (via a ref, so the instance isn't recreated) + `canRoll` (via the view); `GameScreen` computes `canRollTap`/`onRollTap` mirroring the button visibility and dispatches to `handleRoll`/`handleOpeningRoll`.
+- **DEV hook.** `window.__gs.poke(partial)` merges an arbitrary partial into the state — used by the verifier to set up a hit scenario.
+- **Verified (Playwright):** a board tap rolls the opening die and the turn dice; an AI move that hits **animates** and sends the white blot to the bar (`bar[1]===1`, black then occupies point 10); 0 console errors; 94 unit tests; build clean.
+- **Deferred to 8.5e-4 (optional):** online-opponent move animation (needs a pre/post state diff + render decoupling — a feature, not polish), landscape off-zone refinement, animating the opening dice on the canvas, optional bar-half perspective flip.
 
 ---
 

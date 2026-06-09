@@ -27,6 +27,8 @@ export default function CanvasBoard({
   interactive = false,
   onMove,
   onReady,
+  onRoll,
+  canRoll = false,
   showFrame = false,
   showMark = false,
   showDice = true,
@@ -37,21 +39,27 @@ export default function CanvasBoard({
   const gsRef = useRef(gameState);
   const dirRef = useRef(direction);
   const interactiveRef = useRef(interactive);
+  const canRollRef = useRef(canRoll);
   const onMoveRef = useRef(onMove);
+  const onRollRef = useRef(onRoll);
 
-  // Keep the onMove ref fresh without changing handleMove's identity (which
-  // would otherwise re-run the mount effect and recreate the p5 instance).
+  // Keep the callback refs fresh without changing the stable handlers' identity
+  // (which would otherwise re-run the mount effect and recreate the p5 instance).
   useEffect(() => { onMoveRef.current = onMove; });
+  useEffect(() => { onRollRef.current = onRoll; });
 
-  const buildView = useCallback((gs, dir, inter) => ({
+  const buildView = useCallback((gs, dir, inter, roll) => ({
     snapshot: toSnapshot(gs, dir),
     gs,
     direction: dir,
+    canRoll: roll,
     sources: inter
       ? [...new Set(getValidMoves(gs, gs.turn).map((m) => engineToRenderPt(m.f, dir)))]
       : [],
     targets: [],
   }), []);
+
+  const handleRoll = useCallback(() => { if (onRollRef.current) onRollRef.current(); }, []);
 
   // Canvas grabbed a checker → compute its legal targets and push them down.
   const handlePickup = useCallback((fromPt) => {
@@ -103,6 +111,7 @@ export default function CanvasBoard({
         live: true,
         onPickup: handlePickup,
         onMove: handleMove,
+        onRoll: handleRoll,
       }), el);
       instRef.current = inst;
 
@@ -113,7 +122,7 @@ export default function CanvasBoard({
       });
       ro.observe(el);
 
-      inst.update(buildView(gsRef.current, dirRef.current, interactiveRef.current));
+      inst.update(buildView(gsRef.current, dirRef.current, interactiveRef.current, canRollRef.current));
       if (onReady) onReady(inst);
     })();
 
@@ -123,15 +132,16 @@ export default function CanvasBoard({
       if (inst) inst.remove();
       instRef.current = null;
     };
-  }, [showFrame, showMark, showDice, embedded, buildView, handlePickup, handleMove, onReady]);
+  }, [showFrame, showMark, showDice, embedded, buildView, handlePickup, handleMove, handleRoll, onReady]);
 
-  // State sync: push the new view on every gameState/direction/interactive change.
+  // State sync: push the new view on every gameState/direction/interactive/canRoll change.
   useEffect(() => {
     gsRef.current = gameState;
     dirRef.current = direction;
     interactiveRef.current = interactive;
-    instRef.current?.update(buildView(gameState, direction, interactive));
-  }, [gameState, direction, interactive, buildView]);
+    canRollRef.current = canRoll;
+    instRef.current?.update(buildView(gameState, direction, interactive, canRoll));
+  }, [gameState, direction, interactive, canRoll, buildView]);
 
   return <div ref={ref} style={{ width: '100%', height: '100%', position: 'relative' }} />;
 }

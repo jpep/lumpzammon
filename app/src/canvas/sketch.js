@@ -45,6 +45,7 @@ export function makeSketch(opts = {}) {
     live = false,
     onPickup,
     onMove,
+    onRoll,
   } = opts;
 
   return (p) => {
@@ -154,6 +155,9 @@ export function makeSketch(opts = {}) {
     if (live) {
       p.mousePressed = () => {
         if (!view.gs) return;
+        // Tap-to-roll: in the roll/opening phase a board tap rolls the dice.
+        // canRoll is only set in those phases, so this never shadows a move drag.
+        if (view.canRoll && onRoll) { onRoll(); return; }
         const turnColor = view.snapshot.turn;
         const hit = hitTestPickup(g, view.snapshot, turnColor, p.mouseX, p.mouseY);
         if (!hit) return;

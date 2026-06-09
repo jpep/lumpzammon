@@ -45,7 +45,8 @@ export function createFlyAnimator() {
   let to = null;
   let isWhite = true;
   let onDone = null;
-  let hideKey = null; // render pt (number) or 'bar:white' / 'bar:black'
+  let hideKeys = [];  // render pts (numbers) or 'bar:white'/'bar:black' to hide
+  let bump = null;    // { fromX, fromY, toX, toY, isWhite } — a hit checker → bar
 
   function start(g, snapshot, move, white, direction, done) {
     from = sourceXY(g, snapshot, move.f, white, direction);
@@ -54,25 +55,44 @@ export function createFlyAnimator() {
     frame = 0;
     active = true;
     onDone = done || null;
-    hideKey = move.f === 'bar' ? (white ? 'bar:white' : 'bar:black') : engineToRenderPt(move.f, direction);
+    hideKeys = [move.f === 'bar' ? (white ? 'bar:white' : 'bar:black') : engineToRenderPt(move.f, direction)];
+    bump = null;
+    // Hit? If the destination holds a single opposing blot, slide it to the bar.
+    if (move.t !== 'off') {
+      const pt = engineToRenderPt(move.t, direction);
+      const signed = snapshot.points[pt] || 0;
+      const isBlot = signed !== 0 && (signed > 0) !== white && Math.abs(signed) === 1;
+      if (isBlot) {
+        const bumpedWhite = !white;
+        const barN = bumpedWhite ? snapshot.bar.white : snapshot.bar.black;
+        bump = {
+          fromX: ptCenterX(g, pt), fromY: stackCY(g, pt, 0),
+          toX: barCenterX(g), toY: barPieceCY(g, bumpedWhite, barN),
+          isWhite: bumpedWhite,
+        };
+        hideKeys.push(pt); // hide the static blot while it flies
+      }
+    }
   }
 
   const isActive = () => active;
-  const hideFrom = () => (active ? hideKey : null);
+  const hideFrom = () => (active ? hideKeys : null);
 
-  // Advance one frame and draw the flying checker. On the last frame it draws the
-  // checker at its destination (anti-flicker) then fires onDone (the commit).
+  // Advance one frame and draw the flying checker(s). On the last frame it draws
+  // them at their destinations (anti-flicker) then fires onDone (the commit).
   function step(p, g, C) {
     if (!active) return;
     frame++;
     const finished = frame >= FLY_FRAMES;
     const t = finished ? 1 : frame / FLY_FRAMES;
     const ts = t * t * (3 - 2 * t); // smoothstep
-    const x = from.x + (to.x - from.x) * ts;
-    const y = from.y + (to.y - from.y) * ts;
     p.noStroke();
     p.fill(isWhite ? C.offwhite : C.ruby);
-    p.ellipse(x, y, 2 * g.r, 2 * g.r);
+    p.ellipse(from.x + (to.x - from.x) * ts, from.y + (to.y - from.y) * ts, 2 * g.r, 2 * g.r);
+    if (bump) {
+      p.fill(bump.isWhite ? C.offwhite : C.ruby);
+      p.ellipse(bump.fromX + (bump.toX - bump.fromX) * ts, bump.fromY + (bump.toY - bump.fromY) * ts, 2 * g.r, 2 * g.r);
+    }
     if (finished) {
       active = false;
       const cb = onDone;
