@@ -63,8 +63,15 @@ export function makeSketch(opts = {}) {
     // update() tell a fresh roll (start the bounce) from a mere moves-change.
     const diceAnimator = createDiceAnimator();
     let lastDiceKey = null;
+    // Opening-roll dice (8.5e-5): one single-die animator per player, started
+    // independently as each player's opening die appears (P1, then P2).
+    const openWhite = createDiceAnimator();
+    const openBlack = createDiceAnimator();
+    const lastOpen = { 1: 0, 2: 0 };
     // Flying-checker animation (8.5e-2) for non-drag (AI) moves.
     const flyAnimator = createFlyAnimator();
+    const anyAnimating = () => drag.active || diceAnimator.isAnimating()
+      || openWhite.isAnimating() || openBlack.isAnimating() || flyAnimator.isActive();
     // For a remote (online) move the new state already exists; we keep rendering
     // the PRE-move view during the fly and swap to this once it lands (8.5e-4).
     let pendingSwap = null;
@@ -81,6 +88,20 @@ export function makeSketch(opts = {}) {
       const values = d.length === 4 ? [d[0], d[0]] : [d[0], d[1]];
       diceAnimator.start(values, gs.turn === 1 ? 'white' : 'black');
       p.loop();
+    };
+
+    // Opening rolls: animate each player's single die as it appears; clear when
+    // the opening resolves (phase leaves 'opening') or a tie resets the rolls.
+    const syncOpening = (gs) => {
+      const cur = (gs && gs.phase === 'opening') ? (gs.openingRolls || {}) : {};
+      for (const pl of [1, 2]) {
+        const v = cur[pl] || 0;
+        if (v === lastOpen[pl]) continue;
+        lastOpen[pl] = v;
+        const anim = pl === 1 ? openWhite : openBlack;
+        if (v > 0) { anim.start([v, null], pl === 1 ? 'white' : 'black'); p.loop(); }
+        else anim.clear();
+      }
     };
 
     p.preload = () => {
@@ -107,8 +128,13 @@ export function makeSketch(opts = {}) {
       drawCheckers(p, g, C, view.snapshot, fontLarge, showMark, flyAnimator.hideFrom());
       drawOffTrays(p, g, C, view.snapshot, view.direction);
       if (showDice && view.gs) {
-        diceAnimator.update();
-        diceAnimator.draw(p, g, C, view.gs, view.direction);
+        if (view.gs.phase === 'opening') {
+          openWhite.update(); openWhite.draw(p, g, C, view.gs, view.direction);
+          openBlack.update(); openBlack.draw(p, g, C, view.gs, view.direction);
+        } else {
+          diceAnimator.update();
+          diceAnimator.draw(p, g, C, view.gs, view.direction);
+        }
       }
       if (flyAnimator.isActive()) flyAnimator.step(p, g, C);
       if (drag.active) {
@@ -127,7 +153,7 @@ export function makeSketch(opts = {}) {
       if (!flyAnimator.isActive() && pendingSwap) {
         view = pendingSwap;
         pendingSwap = null;
-      } else if (!drag.active && !diceAnimator.isAnimating() && !flyAnimator.isActive()) {
+      } else if (!anyAnimating()) {
         // Stop the render loop once nothing is animating (drag / dice / fly).
         p.noLoop();
       }
@@ -137,9 +163,9 @@ export function makeSketch(opts = {}) {
     // drag loop already repaints every frame).
     p.update = (next) => {
       view = { ...view, ...next };
-      if (showDice) syncDice(view.gs);
+      if (showDice) { syncDice(view.gs); syncOpening(view.gs); }
       // Mid-drag/roll/fly the loop already repaints; otherwise redraw once.
-      if (!drag.active && !diceAnimator.isAnimating() && !flyAnimator.isActive()) p.redraw();
+      if (!anyAnimating()) p.redraw();
     };
 
     // Slide a checker for an ENGINE move ({ f, t }); `onDone` is the commit (the

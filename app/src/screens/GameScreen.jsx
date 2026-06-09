@@ -1054,13 +1054,15 @@ export default function GameScreen({
         )}
         {gs.phase === 'opening' && (
           <>
-            {gs.openingRolls[P1] > 0 && (
+            {/* Canvas board animates the opening dice on-board (see diceAnim);
+                the DOM faces are the legacy ?dom display. */}
+            {!useCanvas && gs.openingRolls[P1] > 0 && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                 <Stone player={P1} size={14} />
                 <DiceFace value={gs.openingRolls[P1]} />
               </div>
             )}
-            {gs.openingRolls[P2] > 0 && (
+            {!useCanvas && gs.openingRolls[P2] > 0 && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                 <Stone player={P2} size={14} />
                 <DiceFace value={gs.openingRolls[P2]} />

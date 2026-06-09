@@ -431,7 +431,15 @@ Online opponent moves now **slide** instead of teleporting. Unlike the AI path (
 - **`sketch.js`** — `p.animateRemoteMove(move, isWhite, pendingView)` slides over the **held-back pre-move `view`** and stashes `pendingSwap = pendingView`; once the fly is no longer active the draw loop swaps the view in and renders one more frame before stopping (so the board never freezes mid-slide). `p.isFlying()` / `p.cancelFly()` support the supersede path.
 - **`GameScreen`** passes `animateRemoteMoves={isOnline}` (AI/local never diff-animate — the AI uses the explicit `animateMove`, local drags animate themselves).
 - **Verified (Playwright, two clients):** with A's move driven via `__gs.poke` (which writes to Firebase exactly like a real move), **B animates the slide** (canvas pixels change across the burst, no teleport), converges to the post-move state (13 empty / 10 white, turn → P2 in B's flipped perspective), settles to a stable image (loop stops), and its final frame differs from the pre-move baseline; 0 console errors; 94 unit tests; build clean.
-- **Remaining (8.5e-5, cosmetic / maybe drop):** landscape off-zone refinement (fullscreen spike only), animating the opening dice on the canvas, optional bar-half perspective flip — none affect the embedded game's correctness.
+
+### Phase 8.5e-5 — Opening dice on the canvas (done — 8.5e complete)
+
+The opening rolls now animate on the board, matching the turn dice (8.5e-1 animated only the turn roll; the opening rolls were still DOM faces).
+
+- **`sketch.js`** runs two extra single-die animators, `openWhite`/`openBlack` (the existing `createDiceAnimator` handles a single die via `start([v, null], owner)`). `syncOpening(gs)` starts each player's die as its `openingRolls[p]` first appears (P1, then the AI/opponent's P2) and clears them when the opening resolves (phase leaves `'opening'`) or a tie resets the rolls. The draw branches: in `'opening'` it draws each player's die in its own near quadrant (`diePos` by `owner`); otherwise the 2-die turn roll. A shared `anyAnimating()` gates the redraw/loop-stop across drag + turn dice + opening dice + fly.
+- **`GameScreen`** hides the DOM opening dice faces when on the canvas (kept for the `?dom` fallback); the "Tied!" message stays.
+- **Verified (Playwright):** after the opening roll the die **animates on the canvas** (frame-diff) and renders in white's near quadrant (single die, before P2 rolls); the AI rolls its die; the opening resolves into the move phase (turn dice take over); 0 console errors; 94 unit tests; build clean.
+- **Dropped (no correctness impact):** landscape off-zone refinement (fullscreen `?canvas` spike only) and the optional bar-half perspective flip (no actual rendering bug — online P2 perspective was verified in 8.5a). **Phase 8.5e is complete.**
 
 ---
 
