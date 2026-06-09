@@ -395,6 +395,17 @@ A chess-clock: each turn gets a **15s move allowance** (`MOVE_ALLOWANCE`); time 
 - **Accepted v1 limitation.** If the on-turn player **disconnects**, no forfeit fires (their clock freezes; the game stalls until they return) — auto-forfeiting a vanished player needs a server trigger, which is out of scope.
 - **Verified (Playwright, live):** on-turn live move timer vs off-turn static bank; the move timer counts down; **forfeit on bank-drain** → opponent wins + `endReason:'forfeit'` + bank folded to 0 + recorded to Firebase (vs-AI loss −1; online both clients ±1); the clock **freezes during a cube modal** (14s→14s over 2.6s) then **resumes** on close; the online forfeit **propagates** to the off-turn client. 0 console errors; **94 unit tests** (+2: forfeit scoring); build clean.
 
+### Phase 8.5e-1 — Dice roll animation (done)
+
+The dice now **roll** on the canvas instead of appearing instantly. `canvas/diceAnim.js` ports devanture's ball-physics state machine — `ROLLING` (24 frames: each die's 6 balls bounce freely off the die walls) → `SETTLING` (22 frames: balls lerp to their assigned pip positions) → `DONE` (duplicate balls deactivated so a die of value N shows exactly N pips). 8.4 had ported only the static settled faces.
+
+- **`canvas/diceAnim.js`** — `createDiceAnimator()` returns a per-p5-instance animator (`start`/`setFinal`/`clear`/`isAnimating`/`update`/`draw`); state lives in the closure (two instances can't bleed). It reuses `dice.js`'s `PIP_LAYOUTS` + `diceFromGameState` (the latter for the spent-die 50% fade). `dice.js` was trimmed to just those two shared helpers (the static `drawDice`/`getDiePos` it added in 8.4 are superseded).
+- **Placement.** devanture sits the dice beside/below the board; the embedded square canvas has no off-board room (they'd clip), so the two dice land **on the board in the roller's near quadrant** (`diePos`: right-half centre, bottom for the near player / top for the far one, perspective-aware via `direction`) — the way physical dice rest after a roll. They're slightly-translucent dark squares with ivory pips.
+- **`canvas/sketch.js`** — holds the animator + a `lastDiceKey`. `update()` calls `syncDice(gs)`, which starts a fresh bounce **only** when the roll itself changes (key = `turn + dice values`, so consuming a die — which changes `gs.moves`, not `gs.dice` — does not retrigger). It `loop()`s while animating and `noLoop()`s back to idle when neither a drag nor a roll is in motion (the idle redraw path is unchanged).
+- **`GameScreen.jsx`** — the canvas board now renders with `showDice`; the legacy DOM turn-dice faces are hidden when on the canvas (kept for the `?dom` fallback + the opening-roll display).
+- **Verified (Playwright):** the canvas pixels **change frame-to-frame during the roll** then **settle to a stable image** (the render loop stops when idle); double and non-double rolls; the `?dom` fallback still shows DOM dice; single canvas (StrictMode-safe); 0 console errors; 94 unit tests; build clean.
+- **Deferred to 8.5e-2:** canvas-native flying-checker/board-fill animation (moves still snap), bear-off **tray** rendering, landscape off-zone refinement, opening-roll dice-tap + animating the opening dice, optional bar-half perspective flip.
+
 ---
 
 ## Devanture Skin (p5.js standalone preview)

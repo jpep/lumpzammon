@@ -949,7 +949,7 @@ export default function GameScreen({
                 interactive={myTurn && gs.phase === 'move' && !(isAI && currentPlayer === P2)}
                 onMove={handleCanvasMove}
                 onReady={handleCanvasReady}
-                showDice={false}
+                showDice
               />
             </div>
           ) : (
@@ -1045,7 +1045,9 @@ export default function GameScreen({
           </>
         )}
 
-        {gs.phase !== 'opening' && gs.dice.length > 0 && gs.dice.map((d, i) => {
+        {/* Turn dice: on the canvas board these animate on-board (see diceAnim);
+            the DOM faces are only the legacy ?dom fallback + click-to-select. */}
+        {!useCanvas && gs.phase !== 'opening' && gs.dice.length > 0 && gs.dice.map((d, i) => {
           // Count how many of this die value have been used
           const totalOfValue = gs.dice.filter(v => v === d).length;
           const remainingOfValue = gs.moves.filter(v => v === d).length;

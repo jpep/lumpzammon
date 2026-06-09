@@ -15,7 +15,7 @@ import { extractDominantHue, buildPalette } from './palette';
 import { drawBoard } from './drawBoard';
 import { drawCheckers } from './drawCheckers';
 import { drawMessageVeil, drawIntroFrame, drawGommanHollow } from './drawFrame';
-import { drawDice } from './dice';
+import { createDiceAnimator } from './diceAnim';
 import { hitTestPickup, resolveSnap, updateDragDisplay, drawDraggedChecker } from './interaction';
 import { drawSourceHalo, drawTargetRing } from './highlights';
 import { countAt } from './adapter';
@@ -56,6 +56,24 @@ export function makeSketch(opts = {}) {
       active: false, fromPt: null, turnColor: 'white',
       mouseX: 0, mouseY: 0, dispX: 0, dispY: 0, snapPt: null, snapT: 0,
     };
+    // Dice roll animation (8.5e). One animator per instance; `lastDiceKey` lets
+    // update() tell a fresh roll (start the bounce) from a mere moves-change.
+    const diceAnimator = createDiceAnimator();
+    let lastDiceKey = null;
+
+    // Detect a new roll in the incoming state and (re)start the bounce. Keyed on
+    // (turn + dice values) so consuming a die — which changes gs.moves, not
+    // gs.dice — does NOT retrigger the animation.
+    const syncDice = (gs) => {
+      const key = gs && gs.dice && gs.dice.length ? `${gs.turn}:${gs.dice.join(',')}` : null;
+      if (key === lastDiceKey) return;
+      lastDiceKey = key;
+      if (!key) { diceAnimator.clear(); return; }
+      const d = gs.dice;
+      const values = d.length === 4 ? [d[0], d[0]] : [d[0], d[1]];
+      diceAnimator.start(values, gs.turn === 1 ? 'white' : 'black');
+      p.loop();
+    };
 
     p.preload = () => {
       bgImage = p.loadImage(fond2Url);
@@ -79,7 +97,10 @@ export function makeSketch(opts = {}) {
         drawSourceHalo(p, g, C, view.sources, view.snapshot, drag.active ? drag.fromPt : null);
       }
       drawCheckers(p, g, C, view.snapshot, fontLarge, showMark);
-      if (showDice && view.gs) drawDice(p, g, C, view.gs, view.direction);
+      if (showDice && view.gs) {
+        diceAnimator.update();
+        diceAnimator.draw(p, g, C, view.gs, view.direction);
+      }
       if (drag.active) {
         drawTargetRing(p, g, C, view.targets, drag.snapPt, view.snapshot);
         const snapCount = drag.snapPt != null ? countAt(view.snapshot, drag.snapPt) : 0;
@@ -91,13 +112,18 @@ export function makeSketch(opts = {}) {
         drawIntroFrame(p, g, 1);
         drawGommanHollow(p, g, 1);
       }
+      // Stop the render loop once nothing is animating (drag or dice). redraw()
+      // from update() repaints idle changes; loop() runs only during motion.
+      if (!drag.active && !diceAnimator.isAnimating()) p.noLoop();
     };
 
     // Push new live state/highlights from React. Redraw unless mid-drag (the
     // drag loop already repaints every frame).
     p.update = (next) => {
       view = { ...view, ...next };
-      if (!drag.active) p.redraw();
+      if (showDice) syncDice(view.gs);
+      // Mid-drag or mid-roll the loop already repaints; otherwise redraw once.
+      if (!drag.active && !diceAnimator.isAnimating()) p.redraw();
     };
 
     // Expose the resolved geometry (for the DEV test hook to compute pixels).
