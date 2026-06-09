@@ -1,3 +1,5 @@
+import { newCube } from './cube';
+
 export const P1 = 1;
 export const P2 = 2;
 
@@ -31,6 +33,10 @@ export function newGameState() {
     dice: [], moves: [],
     openingRolls: { 1: 0, 2: 0 },
     turn: 0, phase: 'opening', winner: 0,
+    // Doubling cube (Phase 8.5d). Synced inside the state so online clients share
+    // it. cubeModal carries the in-flight offer/accept handshake (null = none).
+    cube: newCube(),
+    cubeModal: null,
   };
 }
 

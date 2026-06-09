@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   newCube, canDouble, promiseDouble, acceptDouble, declineDouble,
-  shouldAcceptDouble, CUBE_CAP,
+  shouldAcceptDouble, CUBE_CAP, colorOf, playerOf, nextCubeValue,
 } from '../cube.js';
 
 describe('cube state', () => {
@@ -81,5 +81,22 @@ describe('shouldAcceptDouble', () => {
     expect(shouldAcceptDouble(0)).toBe(true);
     expect(shouldAcceptDouble(-25)).toBe(false);
     expect(shouldAcceptDouble(-30)).toBe(false);
+  });
+});
+
+describe('color <-> player bridge', () => {
+  it('maps player 1 to white and 2 to black, and back', () => {
+    expect(colorOf(1)).toBe('white');
+    expect(colorOf(2)).toBe('black');
+    expect(playerOf('white')).toBe(1);
+    expect(playerOf('black')).toBe(2);
+  });
+});
+
+describe('nextCubeValue', () => {
+  it('doubles toward the cap', () => {
+    expect(nextCubeValue({ ...newCube(), value: 1 })).toBe(2);
+    expect(nextCubeValue({ ...newCube(), value: 2 })).toBe(4);
+    expect(nextCubeValue({ ...newCube(), value: 4 })).toBe(4); // capped
   });
 });

@@ -11,7 +11,11 @@ import {
 } from '../game/logic';
 import { applyCombinedMove } from '../game/moveResolution';
 import { gameEndResult } from '../game/gameResult';
-import { aiPlay } from '../game/ai';
+import { aiPlay, evaluate } from '../game/ai';
+import {
+  newCube, canDouble, promiseDouble, acceptDouble, declineDouble,
+  shouldAcceptDouble, colorOf, playerOf, nextCubeValue,
+} from '../game/cube';
 import { appendGame } from '../storage/playerStats';
 import { saveLocalGame, loadLocalGame, clearLocalGame } from '../storage/local';
 
@@ -47,6 +51,37 @@ function Stone({ player, size = 16 }) {
       verticalAlign: 'middle',
       boxShadow: '0 1px 3px rgba(0,0,0,0.4)',
     }} />
+  );
+}
+
+// The doubling cube (Phase 8.5d). A small square showing the current stake
+// multiplier; glows and becomes clickable when the player on roll may double.
+// Tinted on the edge by the owner's checker colour (null = centred/unowned).
+function CubeControl({ value, clickable, onClick, owner }) {
+  const theme = useTheme();
+  const ownerEdge = owner === 'white' ? theme.checkerWhite[0]
+    : owner === 'black' ? theme.checkerBlack[1] : theme.border;
+  return (
+    <button
+      type="button"
+      data-testid="cube-control"
+      onClick={clickable ? onClick : undefined}
+      disabled={!clickable}
+      title={clickable ? 'Double the stakes' : `Stakes ×${value}`}
+      style={{
+        width: 46, height: 46, borderRadius: 8,
+        border: `2px solid ${clickable ? theme.textHighlight : ownerEdge}`,
+        background: clickable ? theme.bgPanel : 'transparent',
+        color: theme.text, fontWeight: 'bold', fontSize: 18, lineHeight: 1,
+        cursor: clickable ? 'pointer' : 'default',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        boxShadow: clickable ? `0 0 12px ${theme.textHighlight}66` : 'none',
+        opacity: clickable ? 1 : 0.6,
+        transition: 'box-shadow 120ms, opacity 120ms',
+      }}
+    >
+      ×{value}
+    </button>
   );
 }
 
@@ -147,6 +182,9 @@ export default function GameScreen({
     bar: rawGs.bar || { 1: 0, 2: 0 },
     off: rawGs.off || { 1: 0, 2: 0 },
     openingRolls: rawGs.openingRolls || { 1: 0, 2: 0 },
+    // Doubling cube (Phase 8.5d): default for pre-cube matches / reconnects.
+    cube: rawGs.cube || newCube(),
+    cubeModal: rawGs.cubeModal || null,
   };
 
   const [selectedFrom, setSelectedFrom] = useState(null);
@@ -515,6 +553,83 @@ export default function GameScreen({
     updateState(finishMove(moved, currentPlayer));
   }, [gs, currentPlayer, myTurn, isAI, updateState]);
 
+  // ── Doubling cube (Phase 8.5d) ────────────────────────────────────────────
+  // Faithful to devanture's R7 variant (1->2->4, each side doubles once), but
+  // restricted to the doubler's own roll phase so online never writes the shared
+  // state during the opponent's turn (avoids the racy whole-object Firebase
+  // write). Flow: click cube -> offer modal (self-confirm) -> accept modal
+  // (opponent) -> accept doubles+transfers the cube / decline ends the game at
+  // the pre-double value. All cube state lives in `gs` so it syncs for free.
+
+  // Does THIS client decide for `color`? Online: only that slot. vs-AI: the
+  // human owns white (black is auto-decided, no modal). Local hot-seat: both.
+  const iControl = useCallback((color) => {
+    if (isOnline) return playerSlot === playerOf(color);
+    if (isAI) return color === 'white';
+    return true;
+  }, [isOnline, isAI, playerSlot]);
+
+  // Click the cube to double: promise + raise the self-confirm offer modal in a
+  // single write. Allowed only before rolling, on your own turn, when the rules
+  // (canDouble) permit and nothing else is in flight.
+  const onCubeClick = useCallback(() => {
+    if (gs.winner || gs.cubeModal || isAnimatingRef.current) return;
+    if (gs.phase !== 'roll' || !myTurn) return;
+    if (isAI && currentPlayer === P2) return;
+    const c = colorOf(currentPlayer);
+    if (!canDouble(gs.cube, c)) return;
+    updateState({ ...gs, cube: promiseDouble(gs.cube, c), cubeModal: { type: 'offer', player: c } });
+  }, [gs, myTurn, isAI, currentPlayer, updateState]);
+
+  const respondOffer = useCallback((yes) => {
+    if (gs.cubeModal?.type !== 'offer') return;
+    const offerer = gs.cubeModal.player;
+    if (yes) {
+      const opponent = offerer === 'white' ? 'black' : 'white';
+      updateState({ ...gs, cubeModal: { type: 'accept', player: opponent, offerer } });
+    } else {
+      // Backed out — drop the promise and return to the roll button.
+      updateState({ ...gs, cube: { ...gs.cube, promised: null }, cubeModal: null });
+    }
+  }, [gs, updateState]);
+
+  const respondAccept = useCallback((yes) => {
+    if (gs.cubeModal?.type !== 'accept') return;
+    const { offerer } = gs.cubeModal;
+    if (yes) {
+      updateState({ ...gs, cube: acceptDouble(gs.cube, offerer), cubeModal: null });
+    } else {
+      const { cube, outcome } = declineDouble(gs.cube, offerer);
+      updateState({
+        ...gs, cube, cubeModal: null,
+        winner: playerOf(outcome.winner), phase: 'done', endReason: 'decline',
+      });
+    }
+  }, [gs, updateState]);
+
+  // AI auto-decision on an offered double (vs-AI only; AI is always black). Reads
+  // the live state via gsRef so the deps stay primitive and the timer is stable.
+  useEffect(() => {
+    if (!isAI) return undefined;
+    if (gs.cubeModal?.type !== 'accept' || gs.cubeModal.player !== 'black' || gs.winner) return undefined;
+    const t = setTimeout(() => {
+      const cur = gsRef.current;
+      if (cur.cubeModal?.type !== 'accept' || cur.cubeModal.player !== 'black') return;
+      const advantage = evaluate(cur, P2) - evaluate(cur, P1);
+      const { offerer } = cur.cubeModal;
+      if (shouldAcceptDouble(advantage)) {
+        updateState({ ...cur, cube: acceptDouble(cur.cube, offerer), cubeModal: null });
+      } else {
+        const { cube, outcome } = declineDouble(cur.cube, offerer);
+        updateState({
+          ...cur, cube, cubeModal: null,
+          winner: playerOf(outcome.winner), phase: 'done', endReason: 'decline',
+        });
+      }
+    }, 700);
+    return () => clearTimeout(t);
+  }, [isAI, gs.cubeModal?.type, gs.cubeModal?.player, gs.winner, updateState]);
+
   // Record the finished game to the player's Firebase stats profile, once per
   // game end. Skips local 2P (ambiguous identity) and missing nick. Online: both
   // clients fire, each recording for its own nick (no per-nick double-record).
@@ -544,6 +659,46 @@ export default function GameScreen({
       forceWin: (player) => {
         const loser = player === P1 ? P2 : P1;
         updateState({ ...gsRef.current, off: { [player]: 15, [loser]: 3 }, winner: player, phase: 'done' });
+      },
+      // Put a player on roll (start of turn, pre-dice) so the cube becomes
+      // doublable — lets the cube verifier reach the handshake deterministically.
+      rollPhase: (player) => {
+        updateState({ ...gsRef.current, turn: player, phase: 'roll', dice: [], moves: [] });
+      },
+      // Cube hooks for the doubling-cube verifier (read state + drive handshake
+      // programmatically so a test doesn't depend on canvas/DOM hit-testing).
+      cube: () => gsRef.current.cube,
+      cubeModal: () => gsRef.current.cubeModal,
+      offerDouble: () => {
+        const cur = gsRef.current;
+        const c = colorOf(cur.turn || P1);
+        if (cur.winner || cur.cubeModal || cur.phase !== 'roll' || !canDouble(cur.cube, c)) return false;
+        updateState({ ...cur, cube: promiseDouble(cur.cube, c), cubeModal: { type: 'offer', player: c } });
+        return true;
+      },
+      respondOffer: (yes) => {
+        const cur = gsRef.current;
+        if (cur.cubeModal?.type !== 'offer') return false;
+        const offerer = cur.cubeModal.player;
+        if (yes) {
+          const opp = offerer === 'white' ? 'black' : 'white';
+          updateState({ ...cur, cubeModal: { type: 'accept', player: opp, offerer } });
+        } else {
+          updateState({ ...cur, cube: { ...cur.cube, promised: null }, cubeModal: null });
+        }
+        return true;
+      },
+      respondAccept: (yes) => {
+        const cur = gsRef.current;
+        if (cur.cubeModal?.type !== 'accept') return false;
+        const { offerer } = cur.cubeModal;
+        if (yes) {
+          updateState({ ...cur, cube: acceptDouble(cur.cube, offerer), cubeModal: null });
+        } else {
+          const { cube, outcome } = declineDouble(cur.cube, offerer);
+          updateState({ ...cur, cube, cubeModal: null, winner: playerOf(outcome.winner), phase: 'done', endReason: 'decline' });
+        }
+        return true;
       },
     };
     return () => { window.__gs = undefined; };
@@ -619,6 +774,33 @@ export default function GameScreen({
     fontSize: 14,
     cursor: 'pointer',
   };
+
+  // ── Cube render state ──────────────────────────────────────────────────────
+  const showCube = gs.phase !== 'opening';
+  const cubeClickable = !gs.winner && !gs.cubeModal && !isAnimatingRef.current
+    && gs.phase === 'roll' && myTurn && !(isAI && currentPlayer === P2)
+    && canDouble(gs.cube, colorOf(currentPlayer));
+  const cubeModal = gs.cubeModal;
+  const showOffer = cubeModal?.type === 'offer' && iControl(cubeModal.player) && !gs.winner;
+  const showAccept = cubeModal?.type === 'accept' && iControl(cubeModal.player) && !gs.winner;
+  // Online: a handshake is in flight but it's the opponent's decision.
+  const cubeWaiting = isOnline && cubeModal && !showOffer && !showAccept && !gs.winner;
+  const offererName = cubeModal?.offerer ? playerName(playerOf(cubeModal.offerer)) : '';
+
+  const cubeVeil = {
+    position: 'fixed', inset: 0, zIndex: 90,
+    background: 'rgba(0,0,0,0.78)',
+    display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
+  };
+  const cubeCard = {
+    width: '100%', maxWidth: 380,
+    background: theme.bgPanel, border: `1.5px solid ${theme.text}`, borderRadius: 12,
+    padding: '24px 22px', color: theme.text, textAlign: 'center',
+    boxShadow: '0 0 30px rgba(0,0,0,0.7)',
+  };
+  const cubeTitle = { fontSize: 20, fontWeight: 'bold', color: theme.textHighlight };
+  const cubeSub = { fontSize: 14, color: theme.textSecondary, marginTop: 10, lineHeight: 1.4 };
+  const cubeBtnRow = { display: 'flex', gap: 12, justifyContent: 'center', marginTop: 20 };
 
   return (
     <div style={containerStyle}>
@@ -750,6 +932,14 @@ export default function GameScreen({
 
       {/* Dice + controls — fixed height to prevent board from shifting */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginTop: 16, flexWrap: 'wrap', justifyContent: 'center', minHeight: 52 }}>
+        {showCube && (
+          <CubeControl
+            value={gs.cube.value}
+            clickable={cubeClickable}
+            onClick={onCubeClick}
+            owner={gs.cube.owner}
+          />
+        )}
         {gs.phase === 'opening' && (
           <>
             {gs.openingRolls[P1] > 0 && (
@@ -830,7 +1020,7 @@ export default function GameScreen({
           );
         })()}
 
-        {gs.phase === 'roll' && !gs.winner && myTurn && !(isAI && currentPlayer === P2) && (
+        {gs.phase === 'roll' && !gs.winner && myTurn && !gs.cubeModal && !(isAI && currentPlayer === P2) && (
           <button onClick={handleRoll} style={btnStyle}>
             Roll Dice
           </button>
@@ -848,6 +1038,47 @@ export default function GameScreen({
       </button>
 
       {profileNick && <StatsScreen nick={profileNick} onClose={() => setProfileNick(null)} />}
+
+      {/* Doubling-cube handshake modal (Phase 8.5d) */}
+      {showOffer && (
+        <div style={cubeVeil} data-testid="cube-offer">
+          <div style={cubeCard}>
+            <div style={cubeTitle}>Double the stakes?</div>
+            <div style={cubeSub}>
+              Offer a double to <strong>×{nextCubeValue(gs.cube)}</strong>. Your opponent may accept,
+              or decline and concede <strong>{gs.cube.value}</strong> point{gs.cube.value > 1 ? 's' : ''}.
+            </div>
+            <div style={cubeBtnRow}>
+              <button onClick={() => respondOffer(true)} style={btnStyle} data-testid="cube-offer-yes">Offer</button>
+              <button onClick={() => respondOffer(false)} style={btnSmall} data-testid="cube-offer-no">Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showAccept && (
+        <div style={cubeVeil} data-testid="cube-accept">
+          <div style={cubeCard}>
+            <div style={cubeTitle}>{offererName} offers a double</div>
+            <div style={cubeSub}>
+              Accept to play on for <strong>×{nextCubeValue(gs.cube)}</strong> — or decline and lose{' '}
+              <strong>{gs.cube.value}</strong> point{gs.cube.value > 1 ? 's' : ''}.
+            </div>
+            <div style={cubeBtnRow}>
+              <button onClick={() => respondAccept(true)} style={btnStyle} data-testid="cube-accept-yes">Accept</button>
+              <button onClick={() => respondAccept(false)} style={btnSmall} data-testid="cube-accept-no">Decline</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {cubeWaiting && (
+        <div style={cubeVeil} data-testid="cube-waiting">
+          <div style={cubeCard}>
+            <div style={cubeSub}>Waiting for opponent…</div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

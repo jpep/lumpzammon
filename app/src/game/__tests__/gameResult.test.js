@@ -77,3 +77,34 @@ describe('gameEndResult — gammon/backgammon scoring', () => {
     expect(r).toMatchObject({ didWin: false, delta: -2, oppScore: 2 });
   });
 });
+
+describe('gameEndResult — doubling cube multiplier', () => {
+  it('multiplies a simple win by the cube value', () => {
+    const s = simpleWin(P1);
+    s.cube = { value: 2, owner: 'black', promised: null, used: { white: true, black: false } };
+    const r = gameEndResult({ gs: s, winner: P1, isAI: true });
+    expect(r).toMatchObject({ didWin: true, delta: 2, youScore: 2, oppScore: 0 });
+  });
+  it('multiplies a gammon by the cube value (2 x 2 = 4)', () => {
+    const s = st({ off: { 1: 15, 2: 0 }, winner: P1, cube: { value: 2, owner: null, promised: null, used: { white: false, black: false } } });
+    s.pts[10] = { n: 15, p: P2 }; // gammon
+    const r = gameEndResult({ gs: s, winner: P1, isAI: true });
+    expect(r).toMatchObject({ didWin: true, delta: 4, youScore: 4 });
+  });
+  it('defaults to x1 when no cube is present', () => {
+    const r = gameEndResult({ gs: simpleWin(P1), winner: P1, isAI: true });
+    expect(r).toMatchObject({ delta: 1 });
+  });
+});
+
+describe('gameEndResult — declined double', () => {
+  it('is always a simple win at the (pre-double) cube value, ignoring the board', () => {
+    // Board would classify as a gammon (loser bore off none), but a decline is a
+    // resignation worth exactly the cube value as a single game.
+    const s = st({ off: { 1: 2, 2: 0 }, winner: P1, endReason: 'decline', cube: { value: 2, owner: 'black', promised: null, used: { white: false, black: true } } });
+    s.pts[10] = { n: 13, p: P1 };
+    s.pts[11] = { n: 15, p: P2 };
+    const r = gameEndResult({ gs: s, winner: P1, isAI: true });
+    expect(r).toMatchObject({ didWin: true, delta: 2, youScore: 2 }); // 1 (simple) x 2 (cube)
+  });
+});

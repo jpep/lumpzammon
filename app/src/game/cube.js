@@ -12,6 +12,15 @@
 export const CUBE_CAP = 4;
 export const AI_ACCEPT_THRESHOLD = -25;
 
+// Engine players are numbers (1 = white, 2 = black); the cube reducer speaks in
+// colors. These two helpers bridge the boundary in the game-flow layer.
+export const colorOf = (player) => (player === 1 ? 'white' : 'black');
+export const playerOf = (color) => (color === 'white' ? 1 : 2);
+
+// The cube value after a successful double (capped). Shown on the offer/accept
+// modals so the responder sees what they're agreeing to.
+export const nextCubeValue = (cube) => Math.min(cube.value * 2, CUBE_CAP);
+
 export function newCube() {
   return { value: 1, owner: null, promised: null, used: { white: false, black: false } };
 }

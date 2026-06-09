@@ -2,8 +2,10 @@
 //
 // Returns null when there's no single clear identity to attribute the game to
 // (local two-player on one device) or when there's no winner yet. Gammon /
-// backgammon are scored via rules.js; the doubling-cube and resign multipliers
-// are deferred to Phase 8.5d (no cube exists in the engine yet).
+// backgammon are scored via rules.js, then multiplied by the doubling-cube
+// value (Phase 8.5d). A declined double (endReason 'decline') is always a simple
+// win at the pre-double value — the board position is irrelevant, so we skip
+// classifyWin and force a single.
 //
 // gameResult shape (consumed by storage/playerStats.appendGame):
 //   { youScore, oppScore, opponent, delta, didWin }
@@ -17,7 +19,9 @@ export function gameEndResult({ gs, winner, isOnline, isAI, playerSlot, opponent
 
   const mySlot = isOnline ? playerSlot : P1; // vs-AI: the human is P1
   const didWin = winner === mySlot;
-  const points = winPoints(classifyWin(gs, winner));
+  const cubeValue = gs.cube?.value || 1;
+  const winType = gs.endReason === 'decline' ? 'simple' : classifyWin(gs, winner);
+  const points = winPoints(winType) * cubeValue;
 
   return {
     youScore: didWin ? points : 0,
