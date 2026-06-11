@@ -40,6 +40,13 @@ const IS_IOS = typeof navigator !== 'undefined'
             && (/iPad|iPhone|iPod/.test(navigator.userAgent || '')
                 || (navigator.platform === 'MacIntel' && (navigator.maxTouchPoints || 0) > 1));
 const MAX_STACK = 6;
+// ── TEST LOCAL : rendu "strates" des piles ──────────────────────────────────
+// true → dès qu'un joueur a 2 pièces ou plus sur un triangle, les fiches ne
+// sont plus dessinées : le triangle se remplit de la couleur du joueur par
+// strates depuis la base (1 strate par pièce, 5 strates = triangle plein).
+// Au-delà de 5 pièces le triangle reste simplement plein (compte illisible,
+// assumé). false → rendu classique en pile de fiches.
+const STRATA_STACKS = true;
 
 // Zones cliquables mises à jour à chaque draw
 let resignBtn = null;    // { x, y, w, h, player }
@@ -3692,6 +3699,10 @@ function drawCheckers() {
 function drawStackOnPoint(pt, count, isWhite, skipN) {
   const drawN   = count - (skipN || 0);
   if (drawN <= 0) return;
+  if (STRATA_STACKS && drawN >= 2) {
+    drawStrataStack(pt, drawN, isWhite);
+    return;
+  }
   const cx      = ptCenterX(pt);
   const isBot   = pt <= 12;
   const visible = min(drawN, MAX_STACK);
@@ -3726,6 +3737,54 @@ function drawStackOnPoint(pt, count, isWhite, skipN) {
       }
     } else {
       drawChecker(cx, cy, isWhite, isTop && (isTarget || isSnapped), false, bgCol, alpha);
+    }
+  }
+}
+
+// ── Rendu "strates" (cf. flag STRATA_STACKS) ────────────────────────────────
+// Le triangle staircase est découpé en 5 STRATES visuelles qui regroupent les
+// 7 layers de TRI_LAYERS :
+//   strate 1 : layers 0+1  → bloc de base (les deux demi-paliers, h = 1a)
+//   strate 2 : layer 2     → palier 5/6a
+//   strate 3 : layer 3     → palier 2/3a
+//   strate 4 : layer 4     → palier 1/2a
+//   strate 5 : layers 5+6  → palier 1/3a + pointe 1/6a (h = 2a)
+// n pièces (2 ≤ n) → les n premières strates prennent la couleur du joueur,
+// depuis la base vers la pointe. n ≥ 5 → triangle entièrement plein.
+const STRATA_LAYER_GROUPS = [
+  [0, 1],   // strate 1 — base
+  [2],      // strate 2
+  [3],      // strate 3
+  [4],      // strate 4
+  [5, 6],   // strate 5 — pointe
+];
+
+function drawStrataStack(pt, count, isWhite) {
+  const cx      = ptCenterX(pt);
+  const isBot   = pt <= 12;
+  const baseY   = isBot ? by + 13 * a : by;
+  const pointUp = isBot;
+  const col     = isWhite ? C.offwhite : C.ruby;
+  const nStrata = Math.min(count, STRATA_LAYER_GROUPS.length);
+
+  // Y du top du layer i — même cumul de hauteurs que dans drawTri.
+  function layerTopY(i) {
+    let off = 0;
+    for (let k = 0; k <= i; k++) off += TRI_LAYERS[k].hA * a;
+    return pointUp ? baseY - off : baseY + off - TRI_LAYERS[i].hA * a;
+  }
+
+  noStroke();
+  for (let s = 0; s < nStrata; s++) {
+    // Fade-in par strate au démarrage de partie : une strate suit la même
+    // cadence que la pièce de pile qu'elle remplace (stackIdx = s).
+    const alpha = checkerFadeAlpha(pt, s);
+    if (alpha <= 0) continue;
+    fill(red(col), green(col), blue(col), Math.round(255 * alpha));
+    for (const li of STRATA_LAYER_GROUPS[s]) {
+      const w = TRI_LAYERS[li].wA * a;
+      const h = TRI_LAYERS[li].hA * a;
+      rect(cx - w / 2, layerTopY(li), w, h);
     }
   }
 }

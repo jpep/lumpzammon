@@ -151,6 +151,12 @@ Avant l'intégration React de la Phase 8, on branche la skin standalone sur Fire
 
 ---
 
+## Devanture Skin — Expérimentations visuelles
+
+- [x] **Rendu "strates" des piles (test local)** — flag `STRATA_STACKS` en tête de `devanture/sketch.js` : dès qu'un joueur a 2 pièces ou plus sur un triangle, les fiches disparaissent et le triangle prend la couleur du joueur par strates depuis la base (5 strates au total, regroupement des 7 layers du staircase via `STRATA_LAYER_GROUPS`). 5 pièces ou plus = triangle plein (compte > 5 illisible, assumé). Reste à valider visuellement en local, puis décider : adopter / ajuster / retirer (flag à `false`).
+
+---
+
 ## Phase 8: Devanture Skin → React Integration (next PR)
 
 The `devanture/` p5.js skin is a visual prototype that's now feature-complete enough to merge back into the React app. Each item below maps a skin feature to the React components/hooks that will need to be added or modified.
