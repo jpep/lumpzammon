@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
+<title>Lumpzammon — previsualización de zonas de publicidad</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html,body { width:100%; height:100%; overflow:hidden; background:#000;
+              font-family:Helvetica,Arial,sans-serif; }
+  canvas { display:block; touch-action:none; }
+  /* Panel de controles de la previsualización (NO forma parte del mockup) */
+  #panel {
+    position:fixed; top:10px; left:10px; z-index:10;
+    background:rgba(12,15,20,.82); color:#eef1f4; border:1px solid #2a3340;
+    border-radius:10px; padding:10px 12px; font-size:13px; line-height:1.5;
+    max-width:280px; backdrop-filter:blur(3px);
+  }
+  #panel h1 { font-size:13px; margin-bottom:6px; color:#9aa4b0; font-weight:700;
+              letter-spacing:.3px; text-transform:uppercase; }
+  #panel label { display:flex; align-items:center; gap:7px; cursor:pointer; }
+  #panel .row { margin:5px 0; }
+  #panel select, #panel button, #panel input[type=file] { font-size:12px; }
+  #panel select, #panel button {
+    background:#1b2230; color:#eef1f4; border:1px solid #36404f;
+    border-radius:6px; padding:3px 7px; cursor:pointer; }
+  #panel button.active { background:#3f7fd6; border-color:#3f7fd6; }
+  #panel .btns { display:flex; gap:5px; flex-wrap:wrap; }
+  #panel .hint { color:#7e8896; font-size:11px; margin-top:7px; }
+  #panel input[type=range] { width:100%; }
+  #collapse { position:absolute; top:8px; right:8px; background:none; border:none;
+              color:#9aa4b0; cursor:pointer; font-size:14px; }
+  #panel.collapsed .body { display:none; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div id="panel">
+  <button id="collapse" title="plegar/desplegar">▾</button>
+  <h1>Previsualización de zonas</h1>
+  <div class="body">
+    <div class="row">
+      <label><input type="checkbox" id="tZones" checked> Mostrar zonas seguras</label>
+      <label><input type="checkbox" id="tUI" checked> Mostrar UI del juego (mock)</label>
+      <label><input type="checkbox" id="tAd" checked> Mostrar publicidad (mock)</label>
+      <label><input type="checkbox" id="tBtn" checked> Botón patrocinador</label>
+    </div>
+    <div class="row">
+      Fondo:
+      <select id="bgSel">
+        <option value="fond1.jpg">fond1.jpg (provisional)</option>
+        <option value="fond2.jpg" selected>fond2.jpg (provisional)</option>
+        <option value="__none">— sin fondo —</option>
+      </select>
+      <div style="margin-top:5px"><input type="file" id="bgFile" accept="image/*"></div>
+    </div>
+    <div class="row">
+      Vista:
+      <div class="btns">
+        <button data-vp="full" class="active">Pleno</button>
+        <button data-vp="portrait">Teléfono ▮</button>
+        <button data-vp="landscape">Teléfono ▭</button>
+      </div>
+    </div>
+    <div class="row">
+      Velo del fondo: <span id="veilVal">22%</span>
+      <input type="range" id="veil" min="0" max="80" value="22">
+    </div>
+    <div class="hint" id="info"></div>
+  </div>
+</div>
+
+<script>
+// ============================================================================
+//  Previsualización fiel de la geometría del skin (devanture/sketch.js).
+//  computeGeometry() y getDiePos() replicados 1:1 para que el reparto de
+//  zonas coincida con el juego real. Dibuja sobre canvas (no CSS) para poder
+//  simular marcos de dispositivo (portrait/landscape) en escritorio.
+// ============================================================================
+const cv = document.getElementById('c');
+const ctx = cv.getContext('2d');
+const NAMES_W_A = 6;
+
+const ui = {
+  zones:true, mock:true, ad:true, btn:true,
+  vp:'full', veil:0.22, bg:'fond2.jpg'
+};
+let bgImg = null;
+
+// ---- geometría (idéntica a computeGeometry) --------------------------------
+function geom(W, H) {
+  const diceOnSide = W >= H * 1.1;
+  let a, r, bx, by;
+  if (diceOnSide) {
+    const sideA = Math.max(3.5, NAMES_W_A);
+    const totalA = 13 + 2 * sideA;      // 25
+    const totalH = 15;
+    a = Math.min(W / totalA, H / totalH);
+    if (W >= 1500) a *= 0.85;
+  } else {
+    const portraitMargin = 8;
+    const maxW = W - 2 * portraitMargin;
+    const VERTICAL_TOTAL_A = 13 + 9;    // 22
+    a = Math.min(maxW / 13, H / VERTICAL_TOTAL_A);
+  }
+  r = a / 2;
+  bx = (W - 13 * a) / 2;
+  by = (H - 13 * a) / 2;
+  return { diceOnSide, a, r, bx, by, bw: 13 * a, ds: 3.5 * r };
+}
+
+// dieSize=3.5r ; posiciones de dados (getDiePos)
+function dicePositions(g) {
+  const out = [];
+  const { ds, r, a, bx, by, diceOnSide } = g;
+  if (diceOnSide) {
+    const cx = bx - 2.75 * r, x = cx - ds / 2, cellH = ds + r, yBase = by + 13 * a - ds;
+    const cells = { white: [1, 0], black: [4, 5] };
+    for (const p in cells) for (const ci of cells[p])
+      out.push({ x, y: yBase - ci * cellH, w: ds, h: ds });
+  } else {
+    for (let i = 0; i < 2; i++) {
+      const x = bx + i * (ds + r * 0.5);
+      out.push({ x, y: by + 13 * a + r * 1.6, w: ds, h: ds });  // white
+      out.push({ x, y: by - ds - r * 1.6,     w: ds, h: ds });  // black
+    }
+  }
+  return out;
+}
+
+// ---- helpers de dibujo -----------------------------------------------------
+function coverImage(img, x, y, w, h) {
+  const ir = img.width / img.height, rr = w / h;
+  let sw, sh, sx, sy;
+  if (ir > rr) { sh = img.height; sw = sh * rr; sx = (img.width - sw) / 2; sy = 0; }
+  else { sw = img.width; sh = sw / rr; sx = 0; sy = (img.height - sh) / 2; }
+  ctx.drawImage(img, sx, sy, sw, sh, x, y, w, h);
+}
+function rr(x, y, w, h, rad) {
+  ctx.beginPath();
+  ctx.roundRect(x, y, w, h, rad);
+}
+function zone(x, y, w, h, color, lbl, dash) {
+  ctx.save();
+  ctx.fillStyle = color; ctx.globalAlpha = 0.16;
+  rr(x, y, w, h, 6); ctx.fill();
+  ctx.globalAlpha = 0.95; ctx.strokeStyle = color; ctx.lineWidth = 2;
+  if (dash) ctx.setLineDash(dash);
+  rr(x, y, w, h, 6); ctx.stroke();
+  ctx.restore();
+  if (lbl) {
+    ctx.save(); ctx.fillStyle = color; ctx.font = '11px Helvetica,Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText(lbl, x + w / 2, y + 14);
+    ctx.restore();
+  }
+}
+
+// ---- render ----------------------------------------------------------------
+function render() {
+  const DW = window.innerWidth, DH = window.innerHeight;
+  cv.width = DW; cv.height = DH;
+  ctx.clearRect(0, 0, DW, DH);
+
+  // viewport simulado (marco de dispositivo) centrado en la ventana
+  let W = DW, H = DH, ox = 0, oy = 0;
+  if (ui.vp === 'portrait')  { W = Math.min(412, DW - 40); H = Math.min(892, DH - 40); }
+  if (ui.vp === 'landscape') { W = Math.min(892, DW - 40); H = Math.min(412, DH - 40); }
+  ox = (DW - W) / 2; oy = (DH - H) / 2;
+
+  // zona fuera del viewport: oscurecida
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, DW, DH);
+
+  ctx.save();
+  ctx.translate(ox, oy);
+  ctx.beginPath(); ctx.rect(0, 0, W, H); ctx.clip();
+
+  // fondo (cover, centrado) — fiel a CSS background-size:cover
+  if (bgImg) coverImage(bgImg, 0, 0, W, H);
+  else { ctx.fillStyle = '#11151c'; ctx.fillRect(0, 0, W, H); }
+  // velo
+  if (ui.veil > 0) { ctx.fillStyle = `rgba(0,0,0,${ui.veil})`; ctx.fillRect(0, 0, W, H); }
+
+  const g = geom(W, H);
+  const { a, r, bx, by, bw, ds, diceOnSide } = g;
+
+  // ---- publicidad (mock) en la ad-safe zone --------------------------------
+  if (ui.ad) {
+    ctx.save();
+    if (diceOnSide) {
+      // landscape: marca ambiental en gutters externos
+      adBand(8, 8, bx - 16, by - 16, 'MARCA (ambiental)');
+      adBand(bx + bw + 8, 8, W - (bx + bw) - 16, by - 16, 'MARCA (ambiental)');
+    } else {
+      // portrait: banner superior (mejor zona) + inferior secundario
+      const topH = (by - r * 1.6 - ds) - 8;
+      adBand(8, 8, W - 16, Math.max(20, topH), 'BANNER PATROCINADOR');
+    }
+    ctx.restore();
+  }
+
+  // ---- tablero (mock) ------------------------------------------------------
+  if (ui.mock) drawBoard(g);
+
+  // ---- UI mock: dados + bloques de nombre + controles ----------------------
+  if (ui.mock) {
+    ctx.save();
+    ctx.fillStyle = 'rgba(245,245,240,.10)'; ctx.strokeStyle = 'rgba(245,245,240,.5)';
+    ctx.lineWidth = 1.5;
+    for (const d of dicePositions(g)) { rr(d.x, d.y, d.w, d.h, 5); ctx.fill(); ctx.stroke(); }
+    ctx.restore();
+    drawInfoBlocks(g);
+    drawControls(g);
+  }
+
+  // ---- zonas seguras (guías) ----------------------------------------------
+  if (ui.zones) {
+    if (diceOnSide) {
+      const exX = (bx - 2.75 * r) - ds / 2 - 6, exW = W - exX * 2;
+      zone(exX, by - 6, exW, bw + 12, '#e8c33a', 'EXCLUSIÓN — fondo calmado, sin marca ni CTA', [2, 6]);
+    } else {
+      const exY = (by - ds - r * 1.6) - 6;
+      const exH = (by + bw + r * 1.6 + ds) - exY + 6;
+      zone(bx - 6, exY, bw + 12, exH, '#e8c33a', 'EXCLUSIÓN — fondo calmado, sin marca ni CTA', [2, 6]);
+    }
+  }
+
+  // ---- botón patrocinador (discreto, dibujado por la app) ------------------
+  if (ui.btn) drawSponsorBtn(g);
+
+  ctx.restore();
+
+  // marco del dispositivo
+  if (ui.vp !== 'full') {
+    ctx.strokeStyle = '#2a3340'; ctx.lineWidth = 2;
+    ctx.strokeRect(ox, oy, W, H);
+  }
+
+  document.getElementById('info').textContent =
+    `${diceOnSide ? 'HORIZONTAL' : 'VERTICAL'} · viewport ${W|0}×${H|0} · a=${a.toFixed(0)}px · tablero ${(bw|0)}px`;
+}
+
+function adBand(x, y, w, h, lbl) {
+  if (w <= 4 || h <= 4) return;
+  ctx.save();
+  ctx.fillStyle = '#3f7fd6'; ctx.globalAlpha = 0.20; rr(x, y, w, h, 6); ctx.fill();
+  ctx.globalAlpha = 0.9; ctx.strokeStyle = '#3f7fd6'; ctx.lineWidth = 2; ctx.setLineDash([7, 5]);
+  rr(x, y, w, h, 6); ctx.stroke();
+  ctx.setLineDash([]); ctx.fillStyle = '#cfe0fb'; ctx.font = 'bold 12px Helvetica,Arial';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(lbl, x + w / 2, y + h / 2);
+  ctx.restore();
+}
+
+function drawBoard(g) {
+  const { a, bx, by, bw } = g;
+  ctx.save();
+  ctx.fillStyle = 'rgba(20,40,28,.62)'; rr(bx, by, bw, bw, 4); ctx.fill();
+  for (let i = 0; i < 13; i++) {
+    if (i === 6) continue;  // barra central
+    const x = bx + i * a, col = (i % 2 === 0) ? 'rgba(46,157,107,.5)' : 'rgba(31,111,74,.5)';
+    ctx.fillStyle = col;
+    ctx.beginPath(); ctx.moveTo(x, by); ctx.lineTo(x + a, by); ctx.lineTo(x + a / 2, by + bw * 0.4); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(x, by + bw); ctx.lineTo(x + a, by + bw); ctx.lineTo(x + a / 2, by + bw * 0.6); ctx.fill();
+  }
+  ctx.fillStyle = 'rgba(238,241,244,.85)'; ctx.font = `bold ${a*0.9}px Helvetica,Arial`;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText('TABLERO', bx + bw / 2, by + bw / 2);
+  ctx.font = `${a*0.32}px Helvetica,Arial`; ctx.fillStyle = 'rgba(207,233,218,.9)';
+  ctx.fillText('fichas · dados · pip · cronómetros', bx + bw / 2, by + bw / 2 + a * 0.8);
+  ctx.restore();
+}
+
+function drawInfoBlocks(g) {
+  const { a, r, bx, by, bw, ds, diceOnSide } = g;
+  ctx.save();
+  ctx.fillStyle = 'rgba(192,86,59,.30)'; ctx.strokeStyle = 'rgba(192,86,59,.8)'; ctx.lineWidth = 1.5;
+  ctx.font = '11px Helvetica,Arial'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  if (diceOnSide) {
+    // columnas de nombres/scores: reserva NAMES_W_A a ambos lados del tablero.
+    const colW = Math.min(NAMES_W_A * a, bx - 8);
+    const blocks = [
+      { x: bx - 6 - colW, y: by + bw * 0.40, w: colW, h: bw * 0.20 },          // izq
+      { x: bx + bw + 6,   y: by + bw * 0.40, w: colW, h: bw * 0.20 },          // der
+    ];
+    for (const b of blocks) {
+      if (b.w <= 4) continue;
+      rr(b.x, b.y, b.w, b.h, 4); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = 'rgba(238,241,244,.9)'; ctx.fillText('nombre / pip / score', b.x + b.w / 2, b.y + b.h / 2);
+      ctx.fillStyle = 'rgba(192,86,59,.30)';
+    }
+  } else {
+    const wDice = 2 * ds + 0.5 * r;
+    for (const yy of [by - ds - r * 1.6, by + bw + r * 1.6]) {
+      const x = bx + wDice + 6, w = bw - wDice - 12;
+      rr(x, yy, w, ds, 4); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = 'rgba(238,241,244,.9)'; ctx.fillText('nombre / pip / score', x + w / 2, yy + ds / 2);
+      ctx.fillStyle = 'rgba(192,86,59,.30)';
+    }
+  }
+  ctx.restore();
+}
+
+function drawControls(g) {
+  const { r, bx, by, bw, diceOnSide } = g;
+  ctx.save();
+  ctx.fillStyle = 'rgba(192,86,59,.45)'; ctx.strokeStyle = 'rgba(192,86,59,.9)'; ctx.lineWidth = 1.5;
+  ctx.font = '10px Helvetica,Arial'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  if (diceOnSide) {
+    // bandera / exit / cubo apilados en margen izq (~2r del borde)
+    const x = 2 * r - 8, w = 1.8 * r, h = 3 * 3 * r, y = by + bw * 0.3;
+    rr(x, y, w, h, 5); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = 'rgba(238,241,244,.9)'; ctx.fillText('bandera', x + w / 2, y + 12);
+    ctx.fillText('exit', x + w / 2, y + h / 2); ctx.fillText('cubo', x + w / 2, y + h - 12);
+  } else {
+    // esquina sup-derecha: bandera/cubo
+    const w = 1.8 * r, h = 5.7 * r, x = bx + bw - w, y = r;
+    rr(x, y, w, h, 5); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = 'rgba(238,241,244,.9)'; ctx.fillText('bandera', x + w / 2, y + 12);
+    ctx.fillText('cubo', x + w / 2, y + h - 12);
+  }
+  ctx.restore();
+}
+
+// botón patrocinador: landscape abajo-derecha, portrait arriba-izquierda
+function sponsorRect(g, W, H) {
+  const { r } = g, w = Math.max(120, 9 * r), h = 1.6 * r;
+  if (g.diceOnSide) return { x: W - r / 2 - w, y: H - r / 2 - h, w, h };
+  return { x: r / 2, y: r / 2, w, h };
+}
+function drawSponsorBtn(g) {
+  const W = (ui.vp === 'portrait') ? Math.min(412, window.innerWidth - 40)
+          : (ui.vp === 'landscape') ? Math.min(892, window.innerWidth - 40) : window.innerWidth;
+  const H = (ui.vp === 'portrait') ? Math.min(892, window.innerHeight - 40)
+          : (ui.vp === 'landscape') ? Math.min(412, window.innerHeight - 40) : window.innerHeight;
+  const b = sponsorRect(g, W, H);
+  ctx.save();
+  ctx.globalAlpha = 0.55;
+  ctx.fillStyle = '#f4f4f0'; rr(b.x, b.y, b.w, b.h, b.h / 2); ctx.fill();
+  ctx.globalAlpha = 1; ctx.fillStyle = '#11151c';
+  ctx.font = `bold ${Math.min(13, b.h*0.45)}px Helvetica,Arial`;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText('◆ visitar patrocinador', b.x + b.w / 2, b.y + b.h / 2 + 1);
+  ctx.restore();
+}
+
+// ---- controles de la previsualización --------------------------------------
+function loadBg(src) {
+  if (src === '__none') { bgImg = null; render(); return; }
+  const img = new Image();
+  img.onload = () => { bgImg = img; render(); };
+  img.onerror = () => { bgImg = null; render(); };
+  img.src = src;
+}
+document.getElementById('tZones').onchange = e => { ui.zones = e.target.checked; render(); };
+document.getElementById('tUI').onchange    = e => { ui.mock  = e.target.checked; render(); };
+document.getElementById('tAd').onchange    = e => { ui.ad    = e.target.checked; render(); };
+document.getElementById('tBtn').onchange   = e => { ui.btn   = e.target.checked; render(); };
+document.getElementById('bgSel').onchange  = e => { ui.bg = e.target.value; loadBg(ui.bg); };
+document.getElementById('bgFile').onchange = e => {
+  const f = e.target.files[0]; if (!f) return;
+  const url = URL.createObjectURL(f); loadBg(url);
+};
+document.getElementById('veil').oninput = e => {
+  ui.veil = e.target.value / 100;
+  document.getElementById('veilVal').textContent = e.target.value + '%';
+  render();
+};
+document.querySelectorAll('#panel .btns button').forEach(btn => {
+  btn.onclick = () => {
+    document.querySelectorAll('#panel .btns button').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active'); ui.vp = btn.dataset.vp; render();
+  };
+});
+document.getElementById('collapse').onclick = () => {
+  document.getElementById('panel').classList.toggle('collapsed');
+};
+window.addEventListener('resize', render);
+
+loadBg(ui.bg);
+render();
+</script>
+</body>
+</html>
