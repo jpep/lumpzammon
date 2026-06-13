@@ -1,0 +1,81 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Lumpzammon background pool manifest",
+  "description": "Pool de imagenes de fondo + publicidad no invasiva. Ver BACKGROUND_PROTOCOL.md.",
+  "type": "object",
+  "required": ["version", "backgrounds"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "version": { "type": "integer", "minimum": 1 },
+    "comment": { "type": "string" },
+    "sponsorUrlAllowlist": {
+      "type": "array",
+      "description": "Dominios https permitidos para sponsor.url (anti-abuso). Vacio = sin restriccion (no recomendado en prod).",
+      "items": { "type": "string" }
+    },
+    "backgrounds": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/background" }
+    }
+  },
+  "definitions": {
+    "background": {
+      "type": "object",
+      "required": ["id", "variants", "sponsor", "source", "validation", "alt"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9-]+$" },
+        "variants": {
+          "type": "object",
+          "required": ["landscape", "portrait"],
+          "additionalProperties": false,
+          "properties": {
+            "landscape": { "type": ["string", "null"] },
+            "portrait": { "type": ["string", "null"] }
+          }
+        },
+        "dominantHueOverride": {
+          "type": ["number", "null"],
+          "minimum": 0,
+          "maximum": 360
+        },
+        "sponsor": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "required": ["name", "url", "buttonLabel"],
+              "additionalProperties": false,
+              "properties": {
+                "name": { "type": "string" },
+                "url": { "type": "string", "pattern": "^https://" },
+                "buttonLabel": { "type": "string", "maxLength": 24 }
+              }
+            }
+          ]
+        },
+        "source": {
+          "type": "object",
+          "required": ["type", "license"],
+          "properties": {
+            "type": { "enum": ["ai", "stock", "owned"] },
+            "credit": { "type": "string" },
+            "license": { "type": "string" }
+          }
+        },
+        "validation": {
+          "type": "object",
+          "required": ["exclusionClear", "contrastOk", "weightKb"],
+          "properties": {
+            "exclusionClear": { "type": "boolean" },
+            "contrastOk": { "type": "boolean" },
+            "weightKb": { "type": "number", "minimum": 0 },
+            "checkedAt": { "type": ["string", "null"] },
+            "notes": { "type": "string" }
+          }
+        },
+        "alt": { "type": "string" }
+      }
+    }
+  }
+}

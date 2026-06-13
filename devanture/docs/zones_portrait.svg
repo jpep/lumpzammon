@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 1280" width="720" height="1280">
+<rect x="0.0" y="0.0" width="720.0" height="1280.0" fill="#11151c" fill-opacity="1.0" />
+<rect x="8.0" y="8.0" width="704.0" height="184.0" fill="#3f7fd6" fill-opacity="0.18" rx="6" />
+<rect x="8.0" y="8.0" width="704.0" height="184.0" fill="none" fill-opacity="1.0" stroke="#3f7fd6" stroke-width="2" stroke-dasharray="7 5" rx="6" />
+<rect x="8.0" y="1096.0" width="704.0" height="176.0" fill="#3f7fd6" fill-opacity="0.18" rx="6" />
+<rect x="8.0" y="1096.0" width="704.0" height="176.0" fill="none" fill-opacity="1.0" stroke="#3f7fd6" stroke-width="2" stroke-dasharray="7 5" rx="6" />
+<rect x="8.0" y="288.0" width="704.0" height="704.0" fill="#1f6f4a" fill-opacity="1.0" rx="4" />
+<polygon points="8.0,288.0 62.2,288.0 35.1,555.5" fill="#2e9d6b" fill-opacity="0.5"/>
+<polygon points="8.0,992.0 62.2,992.0 35.1,724.5" fill="#2e9d6b" fill-opacity="0.5"/>
+<polygon points="62.2,288.0 116.3,288.0 89.2,555.5" fill="#1f6f4a" fill-opacity="0.5"/>
+<polygon points="62.2,992.0 116.3,992.0 89.2,724.5" fill="#1f6f4a" fill-opacity="0.5"/>
+<polygon points="116.3,288.0 170.5,288.0 143.4,555.5" fill="#2e9d6b" fill-opacity="0.5"/>
+<polygon points="116.3,992.0 170.5,992.0 143.4,724.5" fill="#2e9d6b" fill-opacity="0.5"/>
+<polygon points="170.5,288.0 224.6,288.0 197.5,555.5" fill="#1f6f4a" fill-opacity="0.5"/>
+<polygon points="170.5,992.0 224.6,992.0 197.5,724.5" fill="#1f6f4a" fill-opacity="0.5"/>
+<polygon points="224.6,288.0 278.8,288.0 251.7,555.5" fill="#2e9d6b" fill-opacity="0.5"/>
+<polygon points="224.6,992.0 278.8,992.0 251.7,724.5" fill="#2e9d6b" fill-opacity="0.5"/>
+<polygon points="278.8,288.0 332.9,288.0 305.8,555.5" fill="#1f6f4a" fill-opacity="0.5"/>
+<polygon points="278.8,992.0 332.9,992.0 305.8,724.5" fill="#1f6f4a" fill-opacity="0.5"/>
+<polygon points="332.9,288.0 387.1,288.0 360.0,555.5" fill="#2e9d6b" fill-opacity="0.5"/>
+<polygon points="332.9,992.0 387.1,992.0 360.0,724.5" fill="#2e9d6b" fill-opacity="0.5"/>
+<polygon points="387.1,288.0 441.2,288.0 414.2,555.5" fill="#1f6f4a" fill-opacity="0.5"/>
+<polygon points="387.1,992.0 441.2,992.0 414.2,724.5" fill="#1f6f4a" fill-opacity="0.5"/>
+<polygon points="441.2,288.0 495.4,288.0 468.3,555.5" fill="#2e9d6b" fill-opacity="0.5"/>
+<polygon points="441.2,992.0 495.4,992.0 468.3,724.5" fill="#2e9d6b" fill-opacity="0.5"/>
+<polygon points="495.4,288.0 549.5,288.0 522.5,555.5" fill="#1f6f4a" fill-opacity="0.5"/>
+<polygon points="495.4,992.0 549.5,992.0 522.5,724.5" fill="#1f6f4a" fill-opacity="0.5"/>
+<polygon points="549.5,288.0 603.7,288.0 576.6,555.5" fill="#2e9d6b" fill-opacity="0.5"/>
+<polygon points="549.5,992.0 603.7,992.0 576.6,724.5" fill="#2e9d6b" fill-opacity="0.5"/>
+<polygon points="603.7,288.0 657.8,288.0 630.8,555.5" fill="#1f6f4a" fill-opacity="0.5"/>
+<polygon points="603.7,992.0 657.8,992.0 630.8,724.5" fill="#1f6f4a" fill-opacity="0.5"/>
+<polygon points="657.8,288.0 712.0,288.0 684.9,555.5" fill="#2e9d6b" fill-opacity="0.5"/>
+<polygon points="657.8,992.0 712.0,992.0 684.9,724.5" fill="#2e9d6b" fill-opacity="0.5"/>
+<text x="360.0" y="640.0" font-family="Helvetica,Arial,sans-serif" font-size="22" font-weight="bold" fill="#eef1f4" text-anchor="middle">BOARD</text>
+<text x="360.0" y="662.0" font-family="Helvetica,Arial,sans-serif" font-size="12" font-weight="normal" fill="#cfe9da" text-anchor="middle">(checkers · dice · pip · timers)</text>
+<rect x="8.0" y="149.9" width="203.1" height="94.8" fill="#c0563b" fill-opacity="0.5" rx="4" />
+<text x="109.5" y="201.3" font-family="Helvetica,Arial,sans-serif" font-size="11" font-weight="normal" fill="#eef1f4" text-anchor="middle">DICE (black)</text>
+<rect x="8.0" y="1035.3" width="203.1" height="94.8" fill="#c0563b" fill-opacity="0.5" rx="4" />
+<text x="109.5" y="1086.7" font-family="Helvetica,Arial,sans-serif" font-size="11" font-weight="normal" fill="#eef1f4" text-anchor="middle">DICE (white)</text>
+<rect x="217.1" y="149.9" width="488.9" height="94.8" fill="#c0563b" fill-opacity="0.3" rx="4" />
+<text x="467.5" y="201.3" font-family="Helvetica,Arial,sans-serif" font-size="11" font-weight="normal" fill="#eef1f4" text-anchor="middle">name / pip / score</text>
+<rect x="217.1" y="1035.3" width="488.9" height="94.8" fill="#c0563b" fill-opacity="0.3" rx="4" />
+<text x="467.5" y="1086.7" font-family="Helvetica,Arial,sans-serif" font-size="11" font-weight="normal" fill="#eef1f4" text-anchor="middle">name / pip / score</text>
+<rect x="663.3" y="27.1" width="48.7" height="154.3" fill="#c0563b" fill-opacity="0.5" rx="4" />
+<text x="687.6" y="21.1" font-family="Helvetica,Arial,sans-serif" font-size="10" font-weight="normal" fill="#9aa4b0" text-anchor="middle">flag/cube</text>
+<rect x="2.0" y="143.9" width="716.0" height="992.2" fill="none" fill-opacity="1.0" stroke="#e8c33a" stroke-width="3" stroke-dasharray="2 6" rx="8" />
+<text x="360.0" y="135.9" font-family="Helvetica,Arial,sans-serif" font-size="12" font-weight="normal" fill="#e8c33a" text-anchor="middle">EXCLUSION ZONE — keep image calm, no faces / text / logos / CTA</text>
+<rect x="12.0" y="12.0" width="150.0" height="30.0" fill="#f4f4f0" fill-opacity="0.85" rx="15" />
+<text x="87.0" y="31.0" font-family="Helvetica,Arial,sans-serif" font-size="13" font-weight="bold" fill="#11151c" text-anchor="middle">◆ visit sponsor</text>
+<text x="14.0" y="26.0" font-family="Helvetica,Arial,sans-serif" font-size="15" font-weight="bold" fill="#eef1f4" text-anchor="start">Lumpzammon — background ad zones · PORTRAIT (720×1280, a=54px)</text>
+<rect x="495.0" y="1106.0" width="210.0" height="122.0" fill="#0c0f14" fill-opacity="0.7" rx="6" />
+<rect x="505" y="1119" width="16" height="12" fill="#1f6f4a" rx="2"/>
+<text x="529.0" y="1130.0" font-family="Helvetica,Arial,sans-serif" font-size="13" font-weight="normal" fill="#9aa4b0" text-anchor="start">Board / play field</text>
+<rect x="505" y="1141" width="16" height="12" fill="#e8c33a" rx="2"/>
+<text x="529.0" y="1152.0" font-family="Helvetica,Arial,sans-serif" font-size="13" font-weight="normal" fill="#9aa4b0" text-anchor="start">Exclusion (calm) zone</text>
+<rect x="505" y="1163" width="16" height="12" fill="#c0563b" rx="2"/>
+<text x="529.0" y="1174.0" font-family="Helvetica,Arial,sans-serif" font-size="13" font-weight="normal" fill="#9aa4b0" text-anchor="start">UI keep-out clusters</text>
+<rect x="505" y="1185" width="16" height="12" fill="#3f7fd6" rx="2"/>
+<text x="529.0" y="1196.0" font-family="Helvetica,Arial,sans-serif" font-size="13" font-weight="normal" fill="#9aa4b0" text-anchor="start">Advertising-safe zone</text>
+<rect x="505" y="1207" width="16" height="12" fill="#f4f4f0" rx="2"/>
+<text x="529.0" y="1218.0" font-family="Helvetica,Arial,sans-serif" font-size="13" font-weight="normal" fill="#9aa4b0" text-anchor="start">Sponsor button (app-drawn)</text>
+</svg>

@@ -1,0 +1,78 @@
+{
+  "$schema": "./backgrounds.schema.json",
+  "version": 1,
+  "comment": "Pool de fondos del juego. Ver devanture/BACKGROUND_PROTOCOL.md. Una entrada solo entra al pool en runtime si validation.exclusionClear && validation.contrastOk && weightKb <= 300. sponsor:null = fondo sin publicidad. Las dos primeras entradas son las imagenes PROVISORIAS a reemplazar (no validadas).",
+  "sponsorUrlAllowlist": [],
+  "backgrounds": [
+    {
+      "id": "provisional-giraffe",
+      "variants": {
+        "landscape": "fond1.jpg",
+        "portrait": null
+      },
+      "dominantHueOverride": null,
+      "sponsor": null,
+      "source": {
+        "type": "owned",
+        "credit": "placeholder",
+        "license": "internal-placeholder"
+      },
+      "validation": {
+        "exclusionClear": false,
+        "contrastOk": false,
+        "weightKb": 1660,
+        "checkedAt": null,
+        "notes": "PROVISORIA: pesa 1.7MB (excede 300KB), rotada 90 grados, sujeto en el centro. Reemplazar."
+      },
+      "alt": "Retrato en blanco y negro de una nina junto a una jirafa (provisional)."
+    },
+    {
+      "id": "provisional-underwater-bed",
+      "variants": {
+        "landscape": "fond2.jpg",
+        "portrait": null
+      },
+      "dominantHueOverride": 200,
+      "sponsor": null,
+      "source": {
+        "type": "owned",
+        "credit": "placeholder",
+        "license": "internal-placeholder"
+      },
+      "validation": {
+        "exclusionClear": false,
+        "contrastOk": false,
+        "weightKb": 240,
+        "checkedAt": null,
+        "notes": "PROVISORIA: sujetos en el centro de la escena. Reemplazar."
+      },
+      "alt": "Escena submarina con dos personas sobre una cama (provisional)."
+    },
+    {
+      "id": "example-sponsored",
+      "variants": {
+        "landscape": "sponsors/example-landscape.jpg",
+        "portrait": "sponsors/example-portrait.jpg"
+      },
+      "dominantHueOverride": null,
+      "sponsor": {
+        "name": "Example Brand",
+        "url": "https://example.com",
+        "buttonLabel": "visit Example"
+      },
+      "source": {
+        "type": "ai",
+        "credit": "generated",
+        "license": "owned"
+      },
+      "validation": {
+        "exclusionClear": true,
+        "contrastOk": true,
+        "weightKb": 280,
+        "checkedAt": "2026-06-13",
+        "notes": "ENTRADA DE EJEMPLO (assets no incluidos). Demuestra el esquema completo de un fondo patrocinado y validado."
+      },
+      "alt": "Fondo de marca de ejemplo con nucleo central calmado y banda de marca periferica."
+    }
+  ]
+}
