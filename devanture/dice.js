@@ -109,6 +109,8 @@ function startRoll(values, player) {
     state: DS.ROLLING, owner: player, frame: 0,
     values, dice: [initDie(values[0]), initDie(values[1])]
   };
+  // Roucoulements au JET (l'aile a déjà sonné au début du tour, via rollAndStart).
+  if (typeof Sfx !== 'undefined') Sfx.diceCoos(values[0], values[1]);
 }
 
 // Pose les dés directement à leur état final (sans animation roll/settle)

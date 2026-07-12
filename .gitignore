@@ -25,3 +25,11 @@ WIP.md
 /p5.min.js
 /UsersVDM*
 /game/
+
+# Fichiers de travail / exports lourds — gardés en local, hors dépôt
+/.tmp_frames/
+/*.gif
+/pigeon sounds/
+/v2_dxf/
+# Miroir local : jonction Windows app/public/devanture -> devanture/
+/app/public/devanture/

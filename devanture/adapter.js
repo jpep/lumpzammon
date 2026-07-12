@@ -10,7 +10,11 @@ let gameMode    = false;  // false = scénario mock, true = jeu réel
 let aiMode      = false;  // true = l'IA joue black (P2)
 let gameWinner  = 0;      // 0 = en cours, 1 = blanc, 2 = noir
 let gameWinType = '';     // 'simple' | 'gammon' | 'backgammon' | 'resign'
-let gameScore   = { white: 0, black: 0 };  // points cumulés sur la session
+let gameScore   = { white: 0, black: 0 };  // points cumulés du MATCH en cours
+// Match joué en 5 POINTS (cube/gammon inclus), PAS en 5 parties. Au-delà, l'IA
+// ne propose plus de revanche.
+const MATCH_TARGET = 5;
+function matchOver() { return gameScore.white >= MATCH_TARGET || gameScore.black >= MATCH_TARGET; }
 
 // Opening roll visualisé : { white: vDice1, black: vDice2, winner: 1|2 } pendant la phase d'intro
 let openingResult = null;
@@ -258,6 +262,9 @@ function finalizeMoveStep() {
     const key   = winner === 1 ? 'white' : 'black';
     gameScore[key] += winPoints(gameWinType) * cubeValue;
     recordGameToProfile(key, gameWinType);
+    if (typeof GameLog !== 'undefined') {
+      GameLog.endGame({ winner: key, type: gameWinType, cube: cubeValue, points: winPoints(gameWinType) * cubeValue });
+    }
     syncMockState();
     return;   // partie terminée, ne pas enchaîner
   }
@@ -289,6 +296,32 @@ function findMoveSequence(state, pl, fromIdx, toIdx, depth) {
   return null;
 }
 
+// ── Historique des mouvements pour l'undo partiel ────────────────────────────
+// Pile de snapshots gameState (Logic.clone) prise AVANT chaque mouvement
+// utilisateur (applyRealMove / applyMultipleMoves). Permet à l'utilisateur de
+// rejouer le dernier coup en cliquant sur un dé déjà utilisé (= grisé) — le
+// dé se rallume et la fiche revient à sa position de départ.
+// Réinitialisée à chaque début de tour (rollAndStart) et à chaque démarrage
+// de partie (startGame). Ne s'applique qu'au joueur LOCAL_PLAYER (white) —
+// l'IA n'undo pas.
+let turnHistory = [];
+function pushTurnHistory() {
+  if (!gameState) return;
+  turnHistory.push(Logic.clone(gameState));
+}
+function clearTurnHistory() {
+  turnHistory = [];
+}
+function canUndoMove() {
+  return gameState && !gameWinner && turnHistory.length > 0;
+}
+function undoLastMove() {
+  if (!canUndoMove()) return false;
+  gameState = turnHistory.pop();
+  syncMockState();
+  return true;
+}
+
 // ── Appliquer un mouvement réel (1 à 4 dés combinés) ─────────────────────────
 // fromPt : 1-24 ou 'bar'   toPt : 1-24 ou 0 (bearing off)
 function applyRealMove(fromPt, toPt) {
@@ -299,7 +332,9 @@ function applyRealMove(fromPt, toPt) {
 
   const found = findMoveSequence(gameState, pl, fromIdx, toIdx, gameState.moves.length);
   if (!found) return false;
+  pushTurnHistory();           // snapshot AVANT mutation, pour undo via clic dé
   gameState = found.state;
+  if (typeof GameLog !== 'undefined') GameLog.move(pl === 1 ? 'white' : 'black', found.seq);
   finalizeMoveStep();
   return true;
 }
@@ -312,14 +347,21 @@ function applyMultipleMoves(fromPt, toPt, count) {
   const fromIdx = fromPt === 'bar' ? 'bar' : fromPt - 1;
   const toIdx   = toPt   === 0    ? 'off' : toPt - 1;
   const k = Math.max(1, Math.floor(gameState.moves.length / count));
+  const snapshot = Logic.clone(gameState);   // snapshot AVANT toute mutation
   let applied = 0;
+  const allSeq = [];                          // moves cumulés pour le log
   for (let i = 0; i < count; i++) {
     const found = findMoveSequence(gameState, pl, fromIdx, toIdx, k);
     if (!found) break;
     gameState = found.state;
+    for (const m of found.seq) allSeq.push(m);
     applied++;
   }
-  if (applied > 0) finalizeMoveStep();
+  if (applied > 0) {
+    turnHistory.push(snapshot);   // un seul snapshot pour tout le multi-pickup
+    if (typeof GameLog !== 'undefined') GameLog.move(pl === 1 ? 'white' : 'black', allSeq);
+    finalizeMoveStep();
+  }
   return applied;
 }
 
@@ -405,7 +447,14 @@ function tickTimer() {
   let secsToConsume = Math.floor(_accumulatedMs / 1000);
   if (secsToConsume <= 0) return;
   _accumulatedMs -= secsToConsume * 1000;
-  const turn = mockState.turn;
+  // Pendant un modal d'acceptation de cube, l'horloge débite le joueur QUI DOIT
+  // décider (le répondant du double), pas celui dont c'est structurellement le
+  // tour. Sinon, quand l'IA double, le temps s'écoulait à tort sur SON minuteur
+  // alors que c'est le joueur qui réfléchit (take/drop).
+  let turn = mockState.turn;
+  if (modalState && modalState.type === 'accept' && modalState.player) {
+    turn = modalState.player;
+  }
   while (secsToConsume > 0 && !gameWinner) {
     if (timerState.active === 'move') {
       timerState.moveLeft--;
@@ -423,6 +472,9 @@ function tickTimer() {
         gameWinner   = winner;
         gameWinType  = 'simple';
         gameScore[winner === 1 ? 'white' : 'black'] += cubeValue;
+        if (typeof GameLog !== 'undefined') {
+          GameLog.endGame({ winner: winner === 1 ? 'white' : 'black', type: 'timeout', cube: cubeValue, points: cubeValue });
+        }
         cubePromised = null;
         return;
       }
@@ -433,6 +485,14 @@ function tickTimer() {
 
 function endTurn() {
   if (!gameState || gameWinner) return;
+  // Garde anti-race : si l'utilisateur a annulé un coup via undoLastMove
+  // pendant le délai (400 ms) avant que le endTurn programmé ne fire,
+  // gameState.moves peut contenir à nouveau des dés non joués ET des coups
+  // valides — auquel cas on doit RESTER sur le tour courant, pas le clore.
+  if (gameState.moves.length > 0) {
+    const vm = Logic.getValidMoves(gameState, gameState.turn);
+    if (vm.length > 0) return;
+  }
   const nextPl = gameState.turn === 1 ? 2 : 1;
   gameState.turn  = nextPl;
   noMovesNotice   = { active: false, owner: null };
@@ -445,6 +505,11 @@ function endTurn() {
     startTurnTimer();   // démarre le timer même en attente de décision
     return;
   }
+  // IA : abandonne si la défaite est mathématiquement certaine (course perdue,
+  // tout au home) → évite de faire traîner une partie déjà jouée.
+  if (maybeAIResign(nextPl)) return;
+  // R7 : l'IA (black) peut décider d'offrir un double AVANT de lancer.
+  if (maybeAIOfferDouble(nextPl)) return;
   rollAndStart(nextPl);
 }
 
@@ -465,6 +530,9 @@ function isBarThrowImpossible(pl) {
 
 function rollAndStart(nextPl) {
   const turnColor = nextPl === 1 ? 'white' : 'black';
+  // Nouveau tour → on jette l'historique d'undo (impossible d'annuler par-delà
+  // une frontière de tour : les dés ont déjà été repassés à l'adversaire).
+  clearTurnHistory();
 
   // Court-circuit : barre + toutes entrées bloquées → pas de jet, juste les
   // cadres vides en surbrillance, puis on passe.
@@ -475,6 +543,7 @@ function rollAndStart(nextPl) {
     clearDice();                 // diceAnim → EMPTY (cadres vides en surbrillance)
     hasOwnedDice[turnColor] = true;
     startTurnTimer();
+    if (typeof GameLog !== 'undefined') GameLog.pass(turnColor, 'bar-blocked');
     _passCount++;
     noMovesNotice = { active: true, owner: turnColor };
     // En LEARN : pause prolongée pour laisser le temps de lire le tip "no moves"
@@ -486,49 +555,195 @@ function rollAndStart(nextPl) {
     return;
   }
 
-  const newDice   = Logic.rollDice();
-  gameState.dice  = newDice;
-  gameState.moves = [...newDice];
+  // Aile dès le DÉBUT du tour ; dés vidés pendant le lead (le joueur ne peut pas
+  // agir tant qu'ils ne sont pas jetés).
+  gameState.dice  = [];
+  gameState.moves = [];
   syncMockState();
   clearDice();
-  startRoll(newDice, turnColor);
-  hasOwnedDice[turnColor] = true;
-  startTurnTimer();
+  if (typeof Sfx !== 'undefined') Sfx.wing();
+  const LEAD = (typeof Sfx !== 'undefined' && typeof Sfx.LEAD_MS === 'number') ? Sfx.LEAD_MS : 0;
 
-  // Si aucun coup disponible → laisser le user voir le lancer, puis transparence, puis pass
-  const vm = Logic.getValidMoves(gameState, nextPl);
-  if (vm.length === 0 && _passCount < 2) {
-    _passCount++;
-    const ownerName = nextPl === 1 ? 'white' : 'black';
-    // Délais prolongés en LEARN pour laisser le temps de lire le tip "no moves"
-    const inLearn = (typeof isLearnMode === 'function' && isLearnMode());
-    const readDur = inLearn ? 1800 : 800;
-    const passDur = inLearn ? 2500 : 900;
-    // Phase 1 : attendre que l'animation des dés soit posée
-    const waitDone = () => {
-      if (typeof diceAnim !== 'undefined' && diceAnim.state !== 'done') {
-        setTimeout(waitDone, 80);
-        return;
-      }
-      // Phase 2 : pause pour que le joueur lise les valeurs (dés à 100%)
-      setTimeout(() => {
-        // Phase 3 : transparence "comme joués" (50%, sans pips)
-        noMovesNotice = { active: true, owner: ownerName };
-        // Phase 4 : pause + disparition + pass
+  // Le JET (visuel + roucoulements) suit après le lead.
+  const launch = () => {
+    if (!gameMode || gameWinner || gameState.turn !== nextPl) return;
+    const newDice   = Logic.rollDice();
+    gameState.dice  = newDice;
+    gameState.moves = [...newDice];
+    syncMockState();
+    clearDice();
+    startRoll(newDice, turnColor);
+    hasOwnedDice[turnColor] = true;
+    startTurnTimer();
+    if (typeof GameLog !== 'undefined') GameLog.roll(turnColor, newDice);
+
+    // Si aucun coup disponible → laisser le user voir le lancer, puis transparence, puis pass
+    const vm = Logic.getValidMoves(gameState, nextPl);
+    if (vm.length === 0 && _passCount < 2) {
+      if (typeof GameLog !== 'undefined') GameLog.pass(turnColor, 'no-move');
+      _passCount++;
+      const ownerName = nextPl === 1 ? 'white' : 'black';
+      const inLearn = (typeof isLearnMode === 'function' && isLearnMode());
+      const readDur = inLearn ? 1800 : 800;
+      const passDur = inLearn ? 2500 : 900;
+      const waitDone = () => {
+        if (typeof diceAnim !== 'undefined' && diceAnim.state !== 'done') {
+          setTimeout(waitDone, 80);
+          return;
+        }
         setTimeout(() => {
-          noMovesNotice = { active: false, owner: null };
-          endTurn();
-        }, passDur);
-      }, readDur);
-    };
-    waitDone();
-  } else {
-    _passCount = 0;
-    // Si IA active et c'est le tour de black (P2), attendre la fin des dés puis jouer
-    if (aiMode && nextPl === 2) {
-      waitForDiceThenAITurn();
+          noMovesNotice = { active: true, owner: ownerName };
+          setTimeout(() => {
+            noMovesNotice = { active: false, owner: null };
+            endTurn();
+          }, passDur);
+        }, readDur);
+      };
+      waitDone();
+    } else {
+      _passCount = 0;
+      if (aiMode && nextPl === 2) {
+        waitForDiceThenAITurn();
+      } else {
+        maybeAutoForcedHuman(nextPl);
+      }
+    }
+  };
+  if (LEAD > 0) setTimeout(launch, LEAD); else launch();
+}
+
+// ── Auto-jeu des coups FORCÉS en phase de sortie (bear-off) ──────────────────
+// Confort : quand le joueur humain est en bear-off et que le lancer n'a qu'UNE
+// seule façon d'être joué (une seule position finale légale), on le joue
+// automatiquement après un court délai — sans jamais retirer un vrai choix.
+let autoForcedEnabled = true;
+
+// GEL des interactions joueur pendant un mouvement automatique (coup forcé en
+// bear-off). Sans ça, si le joueur a le réflexe de saisir une fiche pendant
+// l'auto-jeu, le drag entre en concurrence avec l'animation → la fiche peut
+// rester visuellement en place alors que le moteur l'a déjà comptée sortie.
+// On le pose AVANT le délai de lecture (maybeAutoForcedHuman) et on le lève
+// uniquement à la toute fin de l'animation (ou si rien n'est joué).
+let autoPlaying = false;
+
+function autoPlayForced(pl) {
+  if (!gameMode || gameWinner || modalState) return false;
+  if (!gameState || !gameState.moves || gameState.moves.length === 0) return false;
+  if (typeof AI === 'undefined' || !AI.enumerateSequences) return false;
+  const res = AI.enumerateSequences(gameState, pl, 2);    // cap 2 : on veut juste savoir si forcé
+  if (res.length !== 1 || !res[0].seq.length) return false;
+  const seq = res[0].seq;
+  if (typeof GameLog !== 'undefined') GameLog.move(pl === 1 ? 'white' : 'black', seq);
+
+  // Animation mutualisée avec l'IA : chaîne les sous-coups d'une même pièce ET
+  // FUSIONNE les pièces de même chemin (déplacées ENSEMBLE, ex. doubles). Gap
+  // accéléré (~25 % : 180 → 135) — plus vif tout en gardant la fluidité.
+  animateSequence(seq, pl, finalizeMoveStep, 135);
+  return true;
+}
+
+// ── Lecture animée d'une séquence de coups (mutualisée IA + coups forcés) ────
+// 1) chaîne les sous-coups d'une MÊME pièce (A→B→C → un seul vol) ;
+// 2) fusionne les pièces de MÊME chemin en un multi-pickup (pieceCount > 1) →
+//    deux fiches partent ENSEMBLE (typique des doubles) ;
+// 3) anime groupe par groupe. pl : 1|2 ; gap : pause (ms) entre groupes (plus
+//    court = plus rapide) ; onComplete : appelé à la fin.
+function animateSequence(seq, pl, onComplete, gap) {
+  if (typeof gap !== 'number') gap = 600;
+  const opp = pl === 1 ? 2 : 1;
+  // Coups forcés uniquement (l'IA a sa propre animation inline) → on gèle les
+  // interactions joueur et on accélère le vol de ~25 % (durScale 0.75).
+  autoPlaying = true;
+  const FORCED_DUR_SCALE = 0.75;
+
+  const chained = [];
+  for (let k = 0; k < seq.length; k++) {
+    const m = seq[k];
+    if (chained.length > 0) {
+      const prev  = chained[chained.length - 1];
+      const lastM = prev.moves[prev.moves.length - 1];
+      if (lastM.t !== 'off' && m.f === lastM.t) { prev.moves.push(m); prev.to = m.t; continue; }
+    }
+    chained.push({ from: m.f, to: m.t, moves: [m] });
+  }
+
+  function samePath(g1, g2) {
+    if (g1.from !== g2.from || g1.to !== g2.to) return false;
+    if (g1.moves.length !== g2.moves.length) return false;
+    for (let i = 0; i < g1.moves.length; i++) {
+      if (g1.moves[i].f !== g2.moves[i].f || g1.moves[i].t !== g2.moves[i].t || g1.moves[i].d !== g2.moves[i].d) return false;
+    }
+    return true;
+  }
+  const groups = [];
+  for (const g of chained) {
+    if (groups.length > 0 && samePath(groups[groups.length - 1], g)) {
+      const prev = groups[groups.length - 1];
+      prev.pieceCount = (prev.pieceCount || 1) + 1;
+      prev.moves = prev.moves.concat(g.moves);
+    } else {
+      groups.push({ from: g.from, to: g.to, moves: g.moves.slice(), pieceCount: 1 });
     }
   }
+
+  let i = 0;
+  function applyNext() {
+    if (gameWinner) { autoPlaying = false; return; }
+    if (i >= groups.length) { autoPlaying = false; onComplete(); return; }
+    const g = groups[i];
+    const fromPt = g.from === 'bar' ? 'bar' : g.from + 1;
+    const toPt   = g.to   === 'off' ? 0    : g.to   + 1;
+    let hit = null, simState = gameState;
+    for (const m of g.moves) {
+      if (m.t !== 'off' && simState.pts[m.t] && simState.pts[m.t].p === opp && simState.pts[m.t].n === 1) {
+        hit = { pt: m.t + 1, isWhite: opp === 1 }; break;
+      }
+      try { simState = Logic.applyMove(simState, pl, m); } catch (e) { break; }
+    }
+    const firstDiceValue = g.moves[0].d;
+    const pieceCount  = g.pieceCount || 1;
+    const chainLength = g.moves.length / pieceCount;
+    const intermediates = [];
+    for (let mi = 0; mi < chainLength - 1; mi++) {
+      const im = g.moves[mi];
+      intermediates.push(im.t === 'off' ? 0 : im.t + 1);
+    }
+    if (typeof startFlyingChecker === 'function') {
+      startFlyingChecker(fromPt, toPt, pl === 1, () => {
+        for (const m of g.moves) gameState = Logic.applyMove(gameState, pl, m);
+        syncMockState();
+        i++;
+        setTimeout(applyNext, gap);
+      }, hit, firstDiceValue, intermediates, pieceCount, FORCED_DUR_SCALE);
+    } else {
+      for (const m of g.moves) gameState = Logic.applyMove(gameState, pl, m);
+      syncMockState();
+      i++;
+      setTimeout(applyNext, gap);
+    }
+  }
+  applyNext();
+}
+
+function maybeAutoForcedHuman(pl) {
+  if (!autoForcedEnabled || !gameMode || gameWinner || modalState) return;
+  if (typeof isLearnMode === 'function' && isLearnMode()) return;      // pas en mode apprentissage
+  if (!gameState || !Logic.allHome(gameState, pl)) return;             // bear-off uniquement
+  const color = pl === 1 ? 'white' : 'black';
+  const tryPlay = () => {
+    if (!gameMode || gameWinner || modalState) return;
+    if (mockState.turn !== color) return;                              // le tour a changé
+    if (typeof diceAnim !== 'undefined' && diceAnim.state !== 'done') { setTimeout(tryPlay, 80); return; }
+    if (!gameState.moves || gameState.moves.length === 0) return;
+    if (!Logic.allHome(gameState, pl)) return;
+    const seqs = AI.enumerateSequences(gameState, pl, 2);
+    if (seqs.length !== 1 || !seqs[0].seq.length) return;              // pas forcé → on laisse jouer
+    // On gèle DÈS le délai de lecture : c'est précisément cette fenêtre de
+    // 450 ms où le joueur a le réflexe de saisir la fiche lui-même.
+    autoPlaying = true;
+    setTimeout(() => { if (!autoPlayForced(pl)) autoPlaying = false; }, 450);
+  };
+  tryPlay();
 }
 
 // Poll l'état de l'animation des dés ; quand DONE, déclenche playAITurn.
@@ -580,26 +795,59 @@ function playAITurn() {
   // l'IA peut enchaîner immédiatement après son action.
   if (mockState.turn !== 'black') return;
   if (modalState) return;
+  const _aiT0 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
   const result = AI.aiPlay(gameState, 2);
+  const _aiThink = ((typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now()) - _aiT0;
   if (!result.seq || result.seq.length === 0) {
+    if (typeof GameLog !== 'undefined') GameLog.pass('black', 'no-move');
     finalizeMoveStep();
     return;
   }
-  // Fusion : si la pièce passe par plusieurs cases (A→B→C), un seul fade A→C
-  const groups = [];
+  if (typeof GameLog !== 'undefined') GameLog.move('black', result.seq, _aiThink);
+  // Fusion étape 1 : si la pièce passe par plusieurs cases (A→B→C), un seul
+  // fade A→C — chaîne les moves consécutifs où la destination du précédent
+  // = origine du courant.
+  const chained = [];
   for (let k = 0; k < result.seq.length; k++) {
     const m = result.seq[k];
-    if (groups.length > 0) {
-      const prev = groups[groups.length - 1];
+    if (chained.length > 0) {
+      const prev = chained[chained.length - 1];
       const lastM = prev.moves[prev.moves.length - 1];
-      // Suite de la même pièce ? (la dest du précédent = origine du courant)
       if (lastM.t !== 'off' && m.f === lastM.t) {
         prev.moves.push(m);
         prev.to = m.t;
         continue;
       }
     }
-    groups.push({ from: m.f, to: m.t, moves: [m] });
+    chained.push({ from: m.f, to: m.t, moves: [m] });
+  }
+
+  // Fusion étape 2 (doubles uniquement) : si plusieurs groupes chaînés ont
+  // exactement le MÊME chemin (mêmes from, to, intermédiaires, séquence de
+  // dés), on les fusionne en un seul groupe multi-pickup avec pieceCount > 1.
+  // Reproduit le comportement humain : sur un double 6-6 envoyant 2 fiches
+  // de 24 vers 12 (via 18), l'IA joue les deux fiches ENSEMBLE plutôt
+  // qu'une après l'autre.
+  function samePath(g1, g2) {
+    if (g1.from !== g2.from || g1.to !== g2.to) return false;
+    if (g1.moves.length !== g2.moves.length) return false;
+    for (let i = 0; i < g1.moves.length; i++) {
+      if (g1.moves[i].f !== g2.moves[i].f) return false;
+      if (g1.moves[i].t !== g2.moves[i].t) return false;
+      if (g1.moves[i].d !== g2.moves[i].d) return false;
+    }
+    return true;
+  }
+  const groups = [];
+  for (const g of chained) {
+    if (groups.length > 0 && samePath(groups[groups.length - 1], g)) {
+      const prev = groups[groups.length - 1];
+      prev.pieceCount = (prev.pieceCount || 1) + 1;
+      // Concatène les moves : on appliquera prev.pieceCount × g.moves au state.
+      prev.moves = prev.moves.concat(g.moves);
+    } else {
+      groups.push({ from: g.from, to: g.to, moves: g.moves.slice(), pieceCount: 1 });
+    }
   }
 
   let i = 0;
@@ -633,9 +881,14 @@ function playAITurn() {
     }
     // Première valeur de dé du groupe (utilisée pour synchroniser le fade du dé)
     const firstDiceValue = g.moves[0].d;
-    // Points intermédiaires (toutes les destinations sauf la finale)
+    // Points intermédiaires (toutes les destinations sauf la finale).
+    // En mode multi-pickup (pieceCount > 1), g.moves contient N copies du
+    // chemin (pieceCount × chainLength) — on calcule donc les intermédiaires
+    // d'UNE chaîne seulement pour éviter de répéter les mêmes points.
+    const pieceCount  = g.pieceCount || 1;
+    const chainLength = g.moves.length / pieceCount;
     const intermediates = [];
-    for (let mi = 0; mi < g.moves.length - 1; mi++) {
+    for (let mi = 0; mi < chainLength - 1; mi++) {
       const im = g.moves[mi];
       intermediates.push(im.t === 'off' ? 0 : im.t + 1);
     }
@@ -645,7 +898,7 @@ function playAITurn() {
         syncMockState();
         i++;
         setTimeout(applyNext, 600);
-      }, hit, firstDiceValue, intermediates);
+      }, hit, firstDiceValue, intermediates, pieceCount);
     } else {
       for (const m of g.moves) gameState = Logic.applyMove(gameState, 2, m);
       syncMockState();
@@ -697,6 +950,9 @@ function resign(player) {
   gameWinType  = (classified === 'simple') ? 'resign' : classified;
   const key    = winner === 1 ? 'white' : 'black';
   gameScore[key] += winPoints(classified) * cubeValue;
+  if (typeof GameLog !== 'undefined') {
+    GameLog.endGame({ winner: key, type: gameWinType, cube: cubeValue, points: winPoints(classified) * cubeValue });
+  }
   cubePromised = null;
   recordGameToProfile(key, gameWinType);
 }
@@ -724,6 +980,7 @@ function modalOfferResponse(accept) {
   const offerer = modalState.player;
   if (accept) {
     const opponent = offerer === 'white' ? 'black' : 'white';
+    if (typeof GameLog !== 'undefined') GameLog.cube('offer', offerer, cubeValue, Math.min(cubeValue * 2, 4));
     modalState = { type: 'accept', player: opponent, offerer };
     // Si l'opposant est l'IA → décision auto sans modal visible côté user
     if (aiMode && opponent === 'black') {
@@ -741,6 +998,7 @@ function modalAcceptResponse(accept) {
   const offerer  = modalState.offerer;
   const opponent = modalState.player;
   if (accept) {
+    if (typeof GameLog !== 'undefined') GameLog.cube('take', opponent);
     cubeValue    = Math.min(cubeValue * 2, 4);
     cubeOwner    = opponent;       // l'accepteur possède désormais le cube
     cubeUsed[offerer] = true;       // l'offrant a consommé son double (variante 1×/joueur)
@@ -752,26 +1010,86 @@ function modalAcceptResponse(accept) {
     gameWinner   = offerer === 'white' ? 1 : 2;
     gameWinType  = 'simple';
     gameScore[offerer] += cubeValue;
+    if (typeof GameLog !== 'undefined') {
+      GameLog.cube('drop', opponent);
+      GameLog.endGame({ winner: offerer, type: 'drop', cube: cubeValue, points: cubeValue });
+    }
     modalState   = null;
     cubePromised = null;
   }
 }
 
 // ── IA : décision auto d'accepter ou refuser un double offert ────────────────
-// Heuristique : on accepte si on n'est pas en (gros) désavantage évalué.
+// Prise/passe fondée sur la proba de gain estimée et le point de prise
+// (≈25 %, relevé par le risque de gammon). L'offrant (white) est sur le trait.
 function decideAIAccept() {
   if (!modalState || modalState.type !== 'accept') return;
   if (modalState.player !== 'black') return;
   if (!aiMode || gameWinner) return;
   let accept = true;
-  if (typeof AI !== 'undefined' && AI.evaluate) {
-    const myScore  = AI.evaluate(gameState, 2);
-    const oppScore = AI.evaluate(gameState, 1);
-    const advantage = myScore - oppScore;
-    // Accepte si pas en désavantage marqué (seuil empirique)
-    accept = advantage > -25;
+  if (typeof AI !== 'undefined' && AI.cubeTake) {
+    accept = AI.cubeTake(gameState, 2, /* doublerOnRoll */ true);
+  } else if (typeof AI !== 'undefined' && AI.evaluate) {
+    accept = (AI.evaluate(gameState, 2) - AI.evaluate(gameState, 1)) > -25; // fallback
   }
   modalAcceptResponse(accept);
+}
+
+// ── IA : décision d'OFFRIR un double au début de son tour (avant de lancer) ──
+// Pose directement le modal d'acceptation côté joueur (white). Retourne true
+// si un double a été proposé (l'appelant ne doit alors PAS lancer les dés).
+function maybeAIOfferDouble(nextPl) {
+  if (!aiMode || nextPl !== 2 || gameWinner) return false;
+  if (cubeValue >= 4 || cubeUsed['black'] || cubePromised) return false;
+  if (typeof AI === 'undefined' || !AI.cubeAction) return false;
+  if (AI.cubeAction(gameState, 2, /* plOnRoll */ true) !== 'double') return false;
+  cubePromised = 'black';
+  if (typeof GameLog !== 'undefined') GameLog.cube('offer', 'black', cubeValue, Math.min(cubeValue * 2, 4));
+  modalState   = { type: 'accept', player: 'white', offerer: 'black' };
+  startTurnTimer();
+  return true;
+}
+
+// Estimation du nombre de LANCERS pour sortir toutes les fiches en course
+// pure : on sort ~2 fiches et ~8 pips par lancer → on retient la plus
+// contraignante des deux bornes (fiches restantes / 2 ; pips / 8). Estimation
+// volontairement simple mais robuste pour comparer deux courses parallèles.
+function estBearoffRolls(state, pl) {
+  const remaining = 15 - (state.off[pl] || 0);
+  if (remaining <= 0) return 0;
+  const pip = Logic.calcPipCount(state, pl);
+  return Math.max(Math.ceil(remaining / 2), Math.ceil(pip / 8));
+}
+
+// ── IA : abandon quand la défaite est mathématiquement (quasi) certaine ──────
+// Conditions PRUDENTES (ne jamais abandonner une partie gagnable) :
+//   • course pure (aucun contact → l'issue ne dépend plus que des dés) ;
+//   • IA entièrement au home ET ayant déjà sorti ≥ 1 fiche (gammon sauvé →
+//     l'abandon vaut une perte SIMPLE, valeur correcte) ;
+//   • retard décisif en NOMBRE DE LANCERS, selon DEUX cas :
+//     (a) milieu de course : retard ≥ 2 lancers (marge contre la variance) ;
+//     (b) TOUTE FIN : l'adversaire finit quasi sûrement au prochain coup
+//         (rollsOpp ≤ 1) et l'IA ne peut PAS finir avant lui (rollsAI ≥ 2,
+//         retard ≥ 1) → son seul espoir serait un double parfait sur son unique
+//         lancer restant (< ~10 %). Sans (b), la marge tombait sous 2 quand il
+//         ne reste que quelques fiches et l'IA jouait une fin déjà perdue.
+// Le critère « pips » seul (écart ≥ 40) ne se déclenchait jamais en bear-off où
+// les pips sont petits : on raisonne désormais en lancers restants.
+const AI_RESIGN_ROLL_GAP = 2;
+function maybeAIResign(nextPl) {
+  if (!aiMode || nextPl !== 2 || gameWinner || modalState) return false;
+  if (!gameState || typeof AI === 'undefined') return false;
+  if (typeof isLearnMode === 'function' && isLearnMode()) return false;   // pas en apprentissage
+  if (AI.hasContact && AI.hasContact(gameState)) return false;            // course pure seulement
+  if (!Logic.allHome(gameState, 2) || gameState.off[2] < 1) return false; // tout au home + gammon sauvé
+  const rollsAI  = estBearoffRolls(gameState, 2);
+  const rollsOpp = estBearoffRolls(gameState, 1);
+  const margin   = rollsAI - rollsOpp;
+  const lost = (margin >= AI_RESIGN_ROLL_GAP)                  // (a) nettement derrière
+            || (rollsOpp <= 1 && rollsAI >= 2 && margin >= 1); // (b) adversaire sur le point de finir
+  if (!lost) return false;
+  if (typeof resign === 'function') { resign('black'); return true; }     // l'IA abandonne
+  return false;
 }
 
 // ── Démarrer une vraie partie ─────────────────────────────────────────────────
@@ -784,12 +1102,16 @@ function startGame(openingDelay) {
   _passCount   = 0;
   gameWinner   = 0;
   gameWinType  = '';
+  // Nouveau MATCH → score à zéro. La REVANCHE (continuation d'un match) sauvegarde
+  // puis restaure ce score autour de startGame pour le conserver.
+  gameScore.white = 0; gameScore.black = 0;
   cubeValue    = 1;
   cubePromised = null;
   cubeOwner    = null;
   cubeUsed     = { white: false, black: false };
   modalState   = null;
   hasOwnedDice = { white: false, black: false };
+  clearTurnHistory();
   resetTimers();
   // Mode LEARN : reset les drapeaux des tips pédagogiques pour une nouvelle partie
   if (typeof resetLearnTips === 'function') resetLearnTips();
@@ -817,6 +1139,14 @@ function startGame(openingDelay) {
   // par checkerAppearT0 côté sketch.js)
   syncMockState();
 
+  // Log : nouvelle partie (additif, sans effet si gamelog.js absent).
+  if (typeof GameLog !== 'undefined') {
+    GameLog.newGame({
+      mode: aiMode ? 'ai' : 'hotseat',
+      players: { white: mockState.players.white, black: mockState.players.black },
+    });
+  }
+
   // Si délai demandé, on reporte l'opening roll pour laisser le temps aux
   // fiches d'apparaître + une petite pause avant le 1er lancer.
   if (openingDelay && openingDelay > 0) {
@@ -834,14 +1164,21 @@ function _startOpeningRoll() {
   openingDisplay = { white: 0, black: 0 };
   openingActive  = true;
 
+  // Log : lancer d'ouverture + qui commence.
+  if (typeof GameLog !== 'undefined') {
+    GameLog.opening(rolls[1], rolls[2], resolved.turn === 1 ? 'white' : 'black');
+  }
+
   // Phase A : white roule un dé (le 2e dé reste vide)
   clearDice();
+  if (typeof Sfx !== 'undefined') Sfx.wing();
   startRoll([rolls[1]], 'white');
   setTimeout(() => {
     if (gameWinner) return;
     openingDisplay.white = rolls[1];           // garde le dé 1 visible côté white
     // Phase B : black roule à son tour
     clearDice();
+    if (typeof Sfx !== 'undefined') Sfx.wing();
     startRoll([rolls[2]], 'black');
     setTimeout(() => {
       if (gameWinner) return;
@@ -883,6 +1220,7 @@ function _startOpeningRoll() {
           // Pas de re-lancer : les dés sont posés directement dans l'ordre du transfer
           const winnerColor2 = resolved.turn === 1 ? 'white' : 'black';
           setDiceFinal(ordered, winnerColor2);
+          if (typeof GameLog !== 'undefined') GameLog.roll(winnerColor2, ordered);
           hasOwnedDice[winnerColor2] = true;
           startTurnTimer();
           if (aiMode && resolved.turn === 2) waitForDiceThenAITurn();

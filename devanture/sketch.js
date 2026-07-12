@@ -46,6 +46,7 @@ let resignBtn = null;    // { x, y, w, h, player }
 let cubeBtns  = { white: null, black: null };
 let modalBtns = null;    // { yes, no, accept, decline, cancel }
 let exitBtns  = [];      // zones cliquables précises (au lieu d'un seul gros rectangle)
+let muteBtn   = null;    // zone cliquable de l'icône mute (au-dessus de l'exit)
 // Boutons "REVENGE? YES/NO" sur l'écran game-over en mode IA
 let revengeBtns = { yes: null, no: null };
 let roomBtns  = [];      // [{ x, y, w, h, player }] — clic NOM = invite
@@ -84,6 +85,13 @@ let _profileOpenedAtTouch = false;
 
 // Animation d'un mouvement (trajectoire parabolique) — visualisation pour IA / adversaire
 let flyingChecker = null;   // { from, to, isWhite, fromX, fromY, toX, toY, t0, dur, onDone }
+// Illumination des cases : intensité (alpha 0..165) LISSÉE par triangle. Chaque
+// case fond doucement vers sa cible → pas de clignotement quand le snap saute
+// d'une case à l'autre ou qu'on sort de la zone valide ("faux contact").
+let _triAlpha = [];
+// Couleur dédiée à l'illumination (copie indépendante de l'ivoire). On modifie
+// SON alpha au dessin — JAMAIS celui de C.ivory (partagé par contours/dés/texte).
+let _triHLColor = null;
 
 // Joueur local (l'utilisateur sur cet écran) — par défaut blanc pour les tests
 const LOCAL_PLAYER = 'white';
@@ -585,10 +593,11 @@ function drawNameText(name, x, y, sz, col, baseline) {
 let C;
 let bgImage;
 let dominantHue = 0;   // extrait du fond au setup (mis à jour à chaque nouvelle partie)
+let _paletteVariant = null;   // variante monochrome forcée (ex. quand fond3 sort), sinon null
 
 // Pool de fonds — l'un est tiré aléatoirement à chaque nouvelle partie (touche [m])
 // Pool conservé après filtrage des fonds qui nuisaient à la lisibilité du jeu.
-const FOND_LIST = ['fond1.jpg', 'fond2.jpg'];
+const FOND_LIST = ['fond1.jpg', 'fond2.jpg', 'fond3.jpg'];
 // Bust de cache pour les images de fond (à incrémenter quand on remplace un
 // fichier sans changer son nom) — utilisé par loadImage et background-image CSS.
 const FOND_CACHE_BUST = 'v=3';
@@ -641,35 +650,64 @@ function extractDominantHue(img) {
   return (Math.atan2(sinSum / count, cosSum / count) * 180 / Math.PI + 360) % 360;
 }
 
+// Variantes monochromes (plateau + fiches) tirées au hasard quand fond3 sort.
+// Chaque variante = une teinte + ajustements saturation/luminosité → palette
+// monochrome cohérente. satMul/briMul s'appliquent à TOUTES les couleurs.
+const FOND3_VARIANTS = [
+  { name: 'vieux rose', hue: 345, satMul: 0.55, briMul: 1.06 },   // le meilleur — inchangé
+  { name: 'sépia',      hue:  34, satMul: 0.58, briMul: 0.74 },   // ex-ambre : plus sombre + désaturé
+  { name: 'olive',      hue:  76, satMul: 0.80, briMul: 0.62 },   // ex-vert : olive, bien sombre
+  { name: 'indigo',     hue: 228, satMul: 0.92, briMul: 0.90 },   // ex-bleu : un peu plus violet
+];
+
+// Choisit la teinte de la palette pour le fond courant : variante monochrome
+// aléatoire si fond3 sort, sinon teinte extraite de l'image (fond1/fond2).
+function chooseHue(img) {
+  if (currentFond === 'fond3.jpg') {
+    _paletteVariant = FOND3_VARIANTS[Math.floor(Math.random() * FOND3_VARIANTS.length)];
+    return _paletteVariant.hue;
+  }
+  _paletteVariant = null;
+  return extractDominantHue(img);
+}
+
 // Palette monochrome dérivée de la teinte dominante de fond.jpg
-// Les % d'opacité sont fixes ; la teinte suit l'image.
+// Les % d'opacité sont fixes ; la teinte suit l'image (ou la variante forcée).
 function buildPalette() {
-  // Si la teinte tombe dans le violet (270-330°), on l'écarte vers le rouge profond
-  // pour éviter les rendus chromatiques bizarres sur certains fonds.
   let h = dominantHue;
-  if (h >= 270 && h <= 330) h = (h < 300) ? 260 : 340;
+  const v = _paletteVariant;
+  // Anti-violet UNIQUEMENT en mode auto (teinte extraite). Les variantes
+  // monochromes intentionnelles (ex. violet de fond3) bypassent ce garde-fou.
+  if (!v && h >= 270 && h <= 330) h = (h < 300) ? 260 : 340;
+  const sM = (v && typeof v.satMul === 'number') ? v.satMul : 1;
+  const bM = (v && typeof v.briMul === 'number') ? v.briMul : 1;
   colorMode(HSB, 360, 100, 100, 255);
+  // Helper : applique les multiplicateurs sat/lum de la variante (clampés à 100).
+  const col = (s, b, a) => color(h, Math.min(100, s * sM), Math.min(100, b * bM), a);
+  // Couleurs CLAIRES (ivoire = texte/lignes ; offwhite = fiches blanches) : on
+  // garde la teinte + un léger désaturage (satMul), mais SANS le briMul — sinon
+  // les variantes sombres (sépia/olive/indigo) GRISAIENT l'ivoire (effet "voile"
+  // gris sur le texte et certaines fiches). Elles doivent rester lumineuses.
+  const colLight = (s, b, a) => color(h, Math.min(100, s * sM), b, a);
   C = {
-    bg:       color(h, 22,  96, 255),
-    board:    color(h, 52,  62, 153),
-    // Triangles : COULEUR UNIQUE sombre (B=18 < board B=62) → plus sombre que
-    // le plateau mais translucide. B=18 = 10% plus sombre que B=20 précédent.
-    // Différence pair vs impair = ~20% d'alpha pour distinguer les cases.
-    triA:     color(h, 50,  18, 160),    // pair  : alpha 160 (~63%)
-    triB:     color(h, 50,  18, 110),    // impair : alpha 110 (~43%, ~20% de moins)
-    bar:      color(h, 42,  52, 153),
-    ivory:    color(h,  8,  97, 255),
-    ruby:     color(h, 45,  20, 255),    // fiche noire (lum 10→20, plus visible)
-    offwhite: color(h, 12,  92, 255),
-    numColor: color(h, 90,  10, 255),    // numéros très foncés (16 → 10)
-    fiberDot: color(h,  5, 100, 255),
-    fiberSnap:color(h, 32, 100, 255),
-    // Couleurs deltas profil joueur :
-    // gainBlue : bleu pastel un peu désaturé pour les +points (victoires)
-    // lossRed  : rouge bordeaux/pétrole pour les −points (défaites)
+    bg:       col(22,  96, 255),
+    board:    col(52,  62, 153),
+    // Triangles : couleur sombre translucide ; ~20 % d'alpha pair vs impair.
+    triA:     col(50,  18, 160),    // pair  : alpha 160 (~63%)
+    triB:     col(50,  18, 110),    // impair : alpha 110 (~43%)
+    bar:      col(42,  52, 153),
+    ivory:    colLight( 8,  97, 255),   // texte / lignes : restent clairs
+    ruby:     col(45,  20, 255),    // fiche "noire" (teintée par la variante)
+    offwhite: colLight(12,  92, 255),   // fiches blanches : restent claires
+    numColor: col(90,  10, 255),
+    fiberDot: col( 5, 100, 255),
+    fiberSnap:col(32, 100, 255),
+    // Deltas profil joueur : FIXES (hors monochrome) pour rester lisibles.
     gainBlue: color(210, 35, 78, 255),
     lossRed:  color(355, 55, 50, 255),
   };
+  // Couleur dédiée illumination des cases (ivoire — claire, hors briMul).
+  _triHLColor = colLight(8, 97, 255);
   colorMode(RGB, 255, 255, 255, 255);
 }
 
@@ -748,7 +786,7 @@ function setup() {
   createCanvas(windowWidth, windowHeight);
   frameRate(30);
   computeGeometry();
-  dominantHue = extractDominantHue(bgImage);
+  dominantHue = chooseHue(bgImage);
   buildPalette();
   document.body.style.backgroundImage = `url('${fondUrl(currentFond)}')`;
 
@@ -801,7 +839,7 @@ function newMatch() {
   currentFond = next;
   loadImage(fondUrl(currentFond), (img) => {
     bgImage = img;
-    dominantHue = extractDominantHue(img);
+    dominantHue = chooseHue(img);
     buildPalette();
     document.body.style.backgroundImage = `url('${fondUrl(currentFond)}')`;
   });
@@ -1005,15 +1043,6 @@ function draw() {
   drawPlayerProfile();   // overlay profil joueur (clic sur nom)
   // EXIT en dernier pour qu'il soit toujours visible (room, game-over, jeu, overlay profil)
   drawExitButton();
-  // ── Outil de test pip-bar (DEBUG) : petit triangle rouge en bas-gauche.
-  // Au clic, incrémente cycliquement mockState.off[turn] de 0 à 15 pour
-  // vérifier visuellement le positionnement et l'allumage des pip-bars.
-  // À retirer quand l'intégration backend Firebase est finie.
-  if (gameMode && !gameWinner && appState === 'game') {
-    const tcx = r * 1.2, tcy = windowHeight - r * 1.2, tsz = r * 0.9;
-    fill(220, 60, 60); noStroke();
-    triangle(tcx, tcy - tsz, tcx - tsz * 0.866, tcy + tsz / 2, tcx + tsz * 0.866, tcy + tsz / 2);
-  }
 
   // ── Transition SIGN OUT : voile noir s'opacifie par-dessus la scène ───────
   // Quand le voile atteint sa pleine opacité, on bascule sur appState='signin'
@@ -2477,6 +2506,31 @@ function drawLandscapeSideControls() {
     drawDoublingCube(cx, cy, cubeR, LOCAL_PLAYER, isCurrent);
   }
 
+  // Icône MUTE : silhouette de haut-parleur (ivoire) + ondes sonores ; barre
+  // diagonale quand le son est coupé. Vectoriel monochrome → rendu garanti.
+  function drawMuteAt(cx, cy) {
+    const muted = (typeof Sfx !== 'undefined' && Sfx.isEnabled) ? !Sfx.isEnabled() : false;
+    const k = GLYPH * 0.9;
+    noStroke(); fill(C.ivory);
+    beginShape();                                    // corps + cône
+    vertex(cx - 0.30 * k, cy - 0.13 * k);
+    vertex(cx - 0.12 * k, cy - 0.13 * k);
+    vertex(cx + 0.10 * k, cy - 0.26 * k);
+    vertex(cx + 0.10 * k, cy + 0.26 * k);
+    vertex(cx - 0.12 * k, cy + 0.13 * k);
+    vertex(cx - 0.30 * k, cy + 0.13 * k);
+    endShape(CLOSE);
+    stroke(C.ivory); strokeWeight(Math.max(1.5, k * 0.05)); noFill();
+    if (muted) {
+      line(cx - 0.30 * k, cy - 0.28 * k, cx + 0.20 * k, cy + 0.28 * k);  // coupé
+    } else {
+      arc(cx + 0.10 * k, cy, 0.34 * k, 0.34 * k, -PI / 4, PI / 4);        // ondes
+      arc(cx + 0.10 * k, cy, 0.58 * k, 0.58 * k, -PI / 4, PI / 4);
+    }
+    noStroke();
+    muteBtn = { x: cx - 0.5 * GLYPH, y: cy - 0.5 * GLYPH, w: GLYPH, h: GLYPH };
+  }
+
   // Disposition unifiée (paysage ET portrait) : pictogrammes éclatés et
   // alignés sur le BORD DROIT du canvas.
   //   Flag : coin supérieur DROIT (légèrement écarté du bord supérieur)
@@ -2514,6 +2568,9 @@ function drawLandscapeSideControls() {
   const cxExit = rightX - exitTotalW / 2;
   const cyExit = windowHeight - margin - exitSz / 2;
   drawExitAt(cxExit, cyExit);
+
+  // Mute — juste AU-DESSUS de l'exit (aligné bord droit comme les autres).
+  drawMuteAt(rightX - GLYPH / 2, cyExit - exitSz - 0.7 * r);
 }
 
 // ── Lobby (Room) — liste des joueurs disponibles ─────────────────────────────
@@ -3202,39 +3259,49 @@ function drawGameOver() {
   // En MODE LEARN : pas de REVENGE? — clic n'importe où = retour au menu.
   // Ailleurs (online / autre) : indication discrète et clic-to-dismiss.
   if (aiMode && !isLearnMode()) {
-    textSize(r * 1.1 * MSG_SCALE);
-    text('REVENGE?', cx, cy + r * 4.05);
-    // Boutons YES / NO sur la ligne suivante, écart REVENGE→action augmenté
-    // (était 2.55r → 3.6r) pour cohérence avec les autres modals (gap ≥ 3r).
-    const btnY = cy + r * 7.65;
-    const btnSz = r * 1.2 * MSG_SCALE;
-    textSize(btnSz);
-    const yesW = textWidth('YES');
-    const noW  = textWidth('NO');
-    const sep  = btnSz * 3.0;
-    const yesCX = cx - sep / 2;
-    const noCX  = cx + sep / 2;
-    const padX  = btnSz * 0.5;
-    const yesHover = mouseX >= yesCX - yesW/2 - padX
-                  && mouseX <= yesCX + yesW/2 + padX
-                  && mouseY >= btnY  - btnSz*0.5
-                  && mouseY <= btnY  + btnSz*0.5;
-    const noHover  = mouseX >= noCX - noW/2 - padX
-                  && mouseX <= noCX + noW/2 + padX
-                  && mouseY >= btnY  - btnSz*0.5
-                  && mouseY <= btnY  + btnSz*0.5;
-    fill(red(C.ivory), green(C.ivory), blue(C.ivory), yesHover ? 255 : 140);
-    text('YES', yesCX, btnY);
-    fill(red(C.ivory), green(C.ivory), blue(C.ivory), noHover ? 255 : 140);
-    text('NO',  noCX, btnY);
-    revengeBtns.yes = {
-      cx: yesCX, cy: btnY,
-      hw: yesW/2 + padX, hh: btnSz * 0.6
-    };
-    revengeBtns.no = {
-      cx: noCX, cy: btnY,
-      hw: noW/2 + padX, hh: btnSz * 0.6
-    };
+    const over = (typeof matchOver === 'function') && matchOver();
+    if (over) {
+      // Match atteint MATCH_TARGET points → plus de revanche. On annonce le
+      // vainqueur du MATCH (clic n'importe où = retour au menu, cf. handler).
+      const mWin = gameScore.white >= gameScore.black
+        ? ((mockState.players && mockState.players.white) || 'WHITE')
+        : ((mockState.players && mockState.players.black) || 'BLACK');
+      textSize(r * 1.0 * MSG_SCALE);
+      text('MATCH OVER', cx, cy + r * 4.05);
+      textSize(r * 0.8 * MSG_SCALE);
+      text(`${mWin} WINS THE MATCH`, cx, cy + r * 6.2);
+      revengeBtns.yes = null;
+      revengeBtns.no  = null;
+    } else {
+      // L'IA propose une revanche (continuation du match jusqu'à MATCH_TARGET).
+      const oppName = (mockState.players && mockState.players.black) || 'OPPONENT';
+      textSize(r * 0.9 * MSG_SCALE);
+      text(`${oppName} is offering you a rematch`, cx, cy + r * 4.05);
+      // YES (accepter) / NO (décliner) — même graphisme que les autres choix oui/non.
+      const btnY = cy + r * 7.65;
+      const btnSz = r * 1.2 * MSG_SCALE;
+      textSize(btnSz);
+      const yesW = textWidth('YES');
+      const noW  = textWidth('NO');
+      const sep  = btnSz * 3.0;
+      const yesCX = cx - sep / 2;
+      const noCX  = cx + sep / 2;
+      const padX  = btnSz * 0.5;
+      const yesHover = mouseX >= yesCX - yesW/2 - padX
+                    && mouseX <= yesCX + yesW/2 + padX
+                    && mouseY >= btnY  - btnSz*0.5
+                    && mouseY <= btnY  + btnSz*0.5;
+      const noHover  = mouseX >= noCX - noW/2 - padX
+                    && mouseX <= noCX + noW/2 + padX
+                    && mouseY >= btnY  - btnSz*0.5
+                    && mouseY <= btnY  + btnSz*0.5;
+      fill(red(C.ivory), green(C.ivory), blue(C.ivory), yesHover ? 255 : 140);
+      text('YES', yesCX, btnY);
+      fill(red(C.ivory), green(C.ivory), blue(C.ivory), noHover ? 255 : 140);
+      text('NO',  noCX, btnY);
+      revengeBtns.yes = { cx: yesCX, cy: btnY, hw: yesW/2 + padX, hh: btnSz * 0.6 };
+      revengeBtns.no  = { cx: noCX, cy: btnY, hw: noW/2 + padX, hh: btnSz * 0.6 };
+    }
   } else {
     // Pas de prompt REVENGE? hors mode IA. Le joueur peut quitter via EXIT
     // (en bas-droite) ou cliquer n'importe où sur l'overlay (cf. handler
@@ -3310,17 +3377,35 @@ function drawBoard() {
   // comme target → le triangle destination conseillé reçoit le même halo
   // (perimeter zigzag + glow point) que les targets de drag, attirant
   // visuellement le joueur vers le bon coup.
-  let targets = drag.active ? getValidTargets(drag.fromPt) : [];
+  // Cible d'intensité par case, puis fondu doux vers cette cible (k = part du
+  // chemin parcouru cette frame). Lisse pickup, déplacement du snap, sortie de
+  // zone et relâché → aucun clignotement.
+  const FADE_MS = 150;
+  const k = Math.min(1, (typeof deltaTime === 'number' ? deltaTime : 16) / FADE_MS);
+  const dragTargets = drag.active ? getValidTargets(drag.fromPt) : [];
+  const snapPt      = drag.active ? drag.snapPt : null;
+  let sug = null;
   if (!drag.active && isLearnMode()) {
-    const sug = getLearnSuggestion();
-    if (sug !== null && !targets.includes(sug)) targets = [...targets, sug];
+    const s = getLearnSuggestion();
+    if (s !== null) sug = s;
+  }
+  for (let pt = 1; pt <= 24; pt++) {
+    let targetA = 0;
+    if (snapPt === pt)                  targetA = 165;   // case sous la pièce : plus vive
+    else if (dragTargets.includes(pt))  targetA = 105;   // autres destinations valides
+    else if (pt === sug)                targetA = 130;   // indice LEARN (hors drag)
+    const cur = _triAlpha[pt] || 0;
+    _triAlpha[pt] = cur + (targetA - cur) * k;
   }
   for (let i = 0; i < 6; i++) {
     const dark = (i % 2 === 0);
-    drawTri(bx + (12-i)*a, by + 13*a, true,  dark,  targets.includes(1+i),  drag.snapPt === 1+i,  1+i);
-    drawTri(bx + (5-i)*a,  by + 13*a, true,  !dark, targets.includes(7+i),  drag.snapPt === 7+i,  7+i);
-    drawTri(bx + i*a,      by,         false, dark,  targets.includes(13+i), drag.snapPt === 13+i, 13+i);
-    drawTri(bx + (7+i)*a,  by,         false, !dark, targets.includes(19+i), drag.snapPt === 19+i, 19+i);
+    const cells = [
+      { x: bx + (12-i)*a, y: by + 13*a, up: true,  d: dark,  pt: 1 + i  },
+      { x: bx + (5-i)*a,  y: by + 13*a, up: true,  d: !dark, pt: 7 + i  },
+      { x: bx + i*a,      y: by,        up: false, d: dark,  pt: 13 + i },
+      { x: bx + (7+i)*a,  y: by,        up: false, d: !dark, pt: 19 + i },
+    ];
+    for (const c of cells) drawTri(c.x, c.y, c.up, c.d, c.pt, _triAlpha[c.pt]);
   }
 
   // Contours en DERNIER (pour rester au-dessus des triangles).
@@ -3360,7 +3445,10 @@ const TRI_LAYERS = [
   { wA: 1/6,   hA: 1.0 },   // 6 — pointe
 ];
 
-function drawTri(x, baseY, pointUp, isDark, isTarget, isSnapped, pt) {
+function drawTri(x, baseY, pointUp, isDark, pt, hlAlpha) {
+  if (typeof hlAlpha !== 'number') hlAlpha = 0;   // alpha 0..165 de l'illumination (lissé)
+  const isTarget  = hlAlpha > 0.5;                // reconstruits pour le halo legacy
+  const isSnapped = hlAlpha >= 150;
   // ── Animation de remplissage du jeu (1ère apparition du plateau) ──────────
   // Pendant le wave : chaque triangle se construit en 2 phases (bar fine r/6
   // pleine hauteur, puis paliers qui s'épaississent en cascade) — la même
@@ -3381,6 +3469,11 @@ function drawTri(x, baseY, pointUp, isDark, isTarget, isSnapped, pt) {
   }
 
   noStroke();
+  // Bascule live via window.TRI_HIGHLIGHT_MODE = 'halo' pour comparer (halo legacy).
+  const triHLFill = !(typeof window !== 'undefined' && window.TRI_HIGHLIGHT_MODE === 'halo');
+  // Le triangle sombre est TOUJOURS dessiné (base). L'illumination est ensuite un
+  // EFFACEMENT (destination-out) par-dessus → révèle la photo NETTE du fond, et le
+  // fondu de sortie ne fait que réduire l'effacement (pas de disparition/repop).
   fill(isDark ? C.triA : C.triB);
 
   const cx = x + a / 2;
@@ -3420,9 +3513,53 @@ function drawTri(x, baseY, pointUp, isDark, isTarget, isSnapped, pt) {
     return;   // pas de halo pendant le remplissage initial (test)
   }
 
+  // ── Illumination "fenêtre nette" : on EFFACE le triangle (destination-out)
+  // pour révéler la photo de fond NETTE, proportionnellement à hlAlpha (lissé).
+  // Comme le triangle sombre est déjà dessiné dessous, réduire l'effacement le
+  // restaure intégralement → aucune disparition au relâché sans mouvement.
+  if (hlAlpha > 0.5 && triHLFill) {
+    const ctx = drawingContext;
+    ctx.save();
+    ctx.globalCompositeOperation = 'destination-out';
+    const erase = Math.min(255, hlAlpha * 1.4) / 255;   // snap 165 → ~0.91 (nette) ; cible 105 → ~0.58
+    ctx.fillStyle = 'rgba(0,0,0,' + erase.toFixed(3) + ')';
+    for (let i = 0; i < TRI_LAYERS.length; i++) {
+      const w = TRI_LAYERS[i].wA * a;
+      ctx.fillRect(cx - w / 2, layerTopY(i), w, TRI_LAYERS[i].hA * a);
+    }
+    ctx.restore();
+
+    // Léger bord blanc temporaire ÉPOUSANT la vraie forme en chicane (escalier)
+    // du triangle — même périmètre zigzag que la silhouette rendue. Suit le fondu.
+    _triHLColor.setAlpha(Math.min(255, hlAlpha * 1.1));
+    stroke(_triHLColor);
+    strokeWeight(1.3);
+    noFill();
+    const sgn = pointUp ? -1 : 1;
+    beginShape();
+    vertex(cx + TRI_LAYERS[0].wA / 2 * a, baseY);              // coin base droit
+    let cumB = 0;                                              // montée côté droit
+    for (let i = 0; i < TRI_LAYERS.length; i++) {
+      cumB += TRI_LAYERS[i].hA * a;
+      const topY = baseY + sgn * cumB;
+      vertex(cx + TRI_LAYERS[i].wA / 2 * a, topY);
+      if (i < TRI_LAYERS.length - 1) vertex(cx + TRI_LAYERS[i + 1].wA / 2 * a, topY);
+    }
+    vertex(cx - TRI_LAYERS[TRI_LAYERS.length - 1].wA / 2 * a, baseY + sgn * 6 * a); // pointe
+    cumB = 6 * a;                                             // descente côté gauche (miroir)
+    for (let i = TRI_LAYERS.length - 1; i >= 0; i--) {
+      cumB -= TRI_LAYERS[i].hA * a;
+      const botY = baseY + sgn * cumB;
+      vertex(cx - TRI_LAYERS[i].wA / 2 * a, botY);
+      if (i > 0) vertex(cx - TRI_LAYERS[i - 1].wA / 2 * a, botY);
+    }
+    endShape(CLOSE);                                          // ferme par la base
+    noStroke();
+  }
+
   // Halo (target/snap) : périmètre en zigzag + glow point animé qui parcourt
-  // l'arête (logique reprise de la version standard, adaptée à l'escalier).
-  if (isTarget || isSnapped) {
+  // l'arête. Désactivé quand l'illumination du fond est active (triHLFill).
+  if ((isTarget || isSnapped) && !triHLFill) {
     // ── 1. Construction du périmètre en zigzag autour de l'escalier ─────
     // Vertices ordonnés en partant du coin bas-droit, en remontant la droite
     // palier par palier, en traversant la pointe, puis en redescendant la
@@ -3658,7 +3795,9 @@ function drawCheckers() {
     const val = mockState.points[pt];
     if (!val) continue;
     let skipN = drag.active && drag.fromPt === pt ? (drag.numPieces || 1) : 0;
-    if (flyingChecker && flyingChecker.from === pt) skipN = Math.max(skipN, 1);
+    if (flyingChecker && flyingChecker.from === pt) {
+      skipN = Math.max(skipN, flyingChecker.count || 1);
+    }
     // Pendant un hit : skip aussi la pièce mangée (elle est dessinée en fade out par drawFlyingChecker)
     if (flyingChecker && flyingChecker.hit && flyingChecker.hit.pt === pt) {
       skipN = Math.max(skipN, 1);
@@ -3887,13 +4026,16 @@ function landingXY(toPt, isWhite, hit) {
   };
 }
 
-function startFlyingChecker(fromPt, toPt, isWhite, onDone, hit, diceValue, intermediatePts) {
+function startFlyingChecker(fromPt, toPt, isWhite, onDone, hit, diceValue, intermediatePts, pieceCount, durScale) {
   const a0 = pieceXY(fromPt, isWhite);
   const a1 = landingXY(toPt, isWhite, hit);   // ← position réelle d'atterrissage
   // hit = { pt, isWhite } : pièce mangée à toPt — affichée AVEC SURBRILLANCE
   // (halo ivory pulsant) pendant la 1ʳᵉ moitié, puis fade out pendant la 2ᵉ.
   // diceValue = valeur du dé consommé (fade en sync avec l'anim)
   // intermediatePts = liste des points intermédiaires d'un mouvement combiné.
+  // pieceCount = nombre de fiches transportées simultanément (multi-pickup,
+  // typique d'un double où l'IA bouge 2 fiches du même point vers la même
+  // destination — visuellement empilées comme un drag humain à numPieces > 1).
   // On garde { x, y, pt } : x/y pour dessiner le disque translucide, pt pour
   // résoudre la couleur de fond (bgCol via triColorForPoint) et permettre au
   // thème nortechico de dessiner le symbole à l'intérieur du disque.
@@ -3905,7 +4047,9 @@ function startFlyingChecker(fromPt, toPt, isWhite, onDone, hit, diceValue, inter
   });
   // Animation un peu rallongée si hit pour laisser le temps de percevoir le
   // halo, mais ~20 % plus rapide que la version précédente (1100 vs 1400 ms).
-  const dur = hit ? 1100 : 900;
+  // durScale : facteur optionnel (coups forcés auto-joués l'utilisent pour
+  // accélérer tout en gardant l'easing).
+  const dur = (hit ? 1100 : 900) * (durScale || 1);
   flyingChecker = {
     from: fromPt, to: toPt, isWhite,
     fromX: a0.x, fromY: a0.y, toX: a1.x, toY: a1.y,
@@ -3914,6 +4058,7 @@ function startFlyingChecker(fromPt, toPt, isWhite, onDone, hit, diceValue, inter
     diceValue: diceValue || null,
     dicePlayer: isWhite ? 'white' : 'black',
     intermediates: interms,
+    count: Math.max(1, pieceCount || 1),
   };
 }
 
@@ -3967,17 +4112,32 @@ function drawFlyingChecker() {
     py -= 4 * lift * ts * (1 - ts);
   }
 
-  // Pièce volante à pleine opacité (plus de fade source/destination)
+  // Pièce(s) volante(s) à pleine opacité — multi-pickup (count > 1) rendu
+  // comme un drag humain à numPieces > 1 : empilement vertical dy * i * a,
+  // direction selon l'origine (bot 1-12 → empile vers le haut, top 13-24 →
+  // empile vers le bas). Pour bar / off, on empile vers le destinataire.
+  const _count   = Math.max(1, fc.count || 1);
+  let   _stackDy = 1;     // +1 = empile vers le bas, -1 vers le haut
+  if (typeof fc.from === 'number') {
+    _stackDy = (fc.from <= 12) ? -1 : 1;
+  } else if (typeof fc.to === 'number') {
+    _stackDy = (fc.to <= 12) ? -1 : 1;
+  }
   fill(cR, cG, cB);
-  ellipse(px, py, 2*r, 2*r);
-  // Theme nortechico : conserve le symbole pendant le glissement
+  for (let _si = 0; _si < _count; _si++) {
+    const _cy = py + _stackDy * _si * a;
+    ellipse(px, _cy, 2*r, 2*r);
+  }
+  // Theme nortechico : conserve le symbole pendant le glissement (sur chaque fiche empilée)
   if (typeof userNick !== 'undefined' && userNick === 'NORTECHICO') {
     // Couleur de fond approximative : on prend le triangle du point d'origine
     // si pt valide, sinon C.bar.
     const fromBg = (typeof fc.from === 'number') ? triColorForPoint(fc.from) : C.bar;
     if (fromBg) {
       const markCol = fc.isWhite ? fromBg : C.offwhite;
-      drawNortechicoMark(px, py, markCol);
+      for (let _si = 0; _si < _count; _si++) {
+        drawNortechicoMark(px, py + _stackDy * _si * a, markCol);
+      }
     }
   }
 
@@ -4157,18 +4317,6 @@ function mousePressed() {
     signinMode = 'choice';
     partnersExpanded = false;
     return;
-  }
-
-  // ── DEBUG : triangle rouge en bas-gauche → incrémente off[turn] cycliquement
-  // (0→15→0). Permet de tester l'affichage de la pip-bar sans bear-off réel.
-  if (gameMode && !gameWinner && appState === 'game') {
-    const tcx = r * 1.2, tcy = windowHeight - r * 1.2, tsz = r * 0.9;
-    if (mouseX >= tcx - tsz && mouseX <= tcx + tsz
-        && mouseY >= tcy - tsz && mouseY <= tcy + tsz) {
-      const pl = mockState.turn;
-      mockState.off[pl] = ((mockState.off[pl] || 0) + 1) % 16;
-      return;
-    }
   }
 
   // ── Mode LEARN : un tip pédagogique est en attente → on le ferme
@@ -4430,7 +4578,7 @@ function mousePressed() {
           // affichage du jeu, et il sera de toute façon écrasé au prochain
           // changement de partie.
           bgImage = img;
-          dominantHue = extractDominantHue(img);
+          dominantHue = chooseHue(img);
           buildPalette();
           document.body.style.backgroundImage = `url('${fondUrl(currentFond)}')`;
         });
@@ -4545,6 +4693,13 @@ function mousePressed() {
     return;
   }
 
+  // Icône MUTE : bascule le son (au-dessus de l'exit).
+  if (muteBtn && mouseX >= muteBtn.x && mouseX <= muteBtn.x + muteBtn.w
+      && mouseY >= muteBtn.y && mouseY <= muteBtn.y + muteBtn.h) {
+    if (typeof Sfx !== 'undefined' && Sfx.setEnabled) Sfx.setEnabled(!Sfx.isEnabled());
+    return;
+  }
+
   // Bouton EXIT (↪⁰) : zones cliquables précises, comportement contextuel.
   // - Overlay profil ouvert : EXIT ferme l'overlay
   // - Game over             : EXIT retourne au room
@@ -4595,12 +4750,20 @@ function mousePressed() {
       return;
     }
     if (aiMode) {
-      // YES : relance une partie contre l'IA, reset score session
+      // Match terminé (un joueur a atteint MATCH_TARGET) : plus de revanche →
+      // clic n'importe où retourne au menu.
+      if (typeof matchOver === 'function' && matchOver()) {
+        gameMode = false; gameWinner = 0; gameWinType = '';
+        appState = 'menu'; menuT0 = millis(); gameModeSelected = null;
+        modalState = null; modalBtns = null; cubePromised = null;
+        profileOverlay = null; signoutTransitionT0 = 0;
+        return;
+      }
+      // YES : ACCEPTE la revanche → partie suivante en CONSERVANT le score du
+      // match (startGame remet le score à zéro → on le sauvegarde/restaure).
       if (revengeBtns.yes && isClickInBtn(revengeBtns.yes)) {
-        if (typeof gameScore !== 'undefined') {
-          gameScore.white = 0;
-          gameScore.black = 0;
-        }
+        const sw = (typeof gameScore !== 'undefined') ? gameScore.white : 0;
+        const sb = (typeof gameScore !== 'undefined') ? gameScore.black : 0;
         // Bascule miroir + nouveau fond entre deux parties (cohérent avec la
         // touche [5] / nouvelle partie depuis le room).
         mirrorMode = !mirrorMode;
@@ -4608,15 +4771,16 @@ function mousePressed() {
         currentFond = next;
         loadImage(fondUrl(currentFond), (img) => {
           bgImage = img;
-          dominantHue = extractDominantHue(img);
+          dominantHue = chooseHue(img);
           buildPalette();
           document.body.style.backgroundImage = `url('${fondUrl(currentFond)}')`;
         });
         if (typeof startGame === 'function') startGame();
+        if (typeof gameScore !== 'undefined') { gameScore.white = sw; gameScore.black = sb; }
         checkerAppearT0 = 0;     // pas de fade-in : fiches à couleur finale directe
         return;
       }
-      // NO : retour au menu de sélection de mode
+      // NO : DÉCLINE → retour au menu de sélection de mode
       if (revengeBtns.no && isClickInBtn(revengeBtns.no)) {
         gameMode = false;
         gameWinner = 0;
@@ -4679,6 +4843,30 @@ function mousePressed() {
     }
   }
 
+  // Undo partiel par clic sur un dé GRISÉ du joueur courant : on défait le
+  // dernier mouvement utilisateur, le dé se rallume (sa valeur revient dans
+  // gameState.moves) et la fiche retourne à sa position d'origine. Marche
+  // en hot-seat pour les deux joueurs (la check `aiMode && turn !== LOCAL`
+  // bloque l'undo pendant le tour de l'IA — l'IA n'undo pas ses propres
+  // coups, et `turnHistory` est de toute façon clear au turn-start de l'IA).
+  // Bloqué pendant un drag actif ou une animation flying (race condition
+  // entre la frame d'animation et le snapshot restauré).
+  if (gameMode && !modalState && !drag.active && !flyingChecker
+      && !(aiMode && mockState.turn !== LOCAL_PLAYER)
+      && typeof canUndoMove === 'function' && canUndoMove()) {
+    const ds = dieSize();
+    const turnPl = mockState.turn;
+    for (let i = 0; i < 2; i++) {
+      const p = getDiePos(turnPl, i);
+      if (mouseX >= p.x && mouseX <= p.x + ds
+          && mouseY >= p.y && mouseY <= p.y + ds
+          && isDieFaded(i, turnPl)) {
+        undoLastMove();
+        return;
+      }
+    }
+  }
+
   if (isClickOnDiceZone(mouseX, mouseY, mockState.turn)) {
     // En mode jeu réel : pas de relance manuelle (les dés sont gérés par endTurn)
     if (!gameMode && (diceAnim.state === DS.EMPTY || diceAnim.state === DS.DONE)) {
@@ -4688,6 +4876,12 @@ function mousePressed() {
     return;
   }
 
+  // GEL pendant un mouvement automatique (coup forcé en bear-off) : on ignore
+  // toute saisie de fiche tant que l'auto-jeu n'est pas terminé. Évite le bug
+  // où le joueur, par réflexe, attrape une fiche pendant l'animation et la
+  // relâche : elle reste visuellement en place alors que le moteur l'a déjà
+  // comptée sortie (incohérence compteur ↔ plateau).
+  if (typeof autoPlaying !== 'undefined' && autoPlaying) return;
   // En mode IA, pendant le tour de l'IA → pas de drag possible (l'IA joue toute seule)
   if (aiMode && mockState.turn !== LOCAL_PLAYER) return;
   // Fiches sur la barre (priorité : must move bar pieces first)
@@ -4788,6 +4982,23 @@ function mouseDragged() {
     }
   }
 
+  // Snap "closest 2D + source-row bias" : on n'arrête plus à la première
+  // cible qui passe la check X — on accumule toutes les candidates dans la
+  // tolérance X (a/2) et on retient celle dont le score pondéré
+  // (eMx, mouseY) au centre de la cible est minimal. Le poids Y dépend de
+  // si la candidate est dans la MÊME rangée que la source (≤ 12 = bas,
+  // ≥ 13 = haut) : 0.6 si match, 1.4 si rangée opposée → bascule à ~1.4a
+  // au-delà de l'équateur, ce qui absorbe les micro-déviations d'une
+  // trajectoire "presque droite" sans empêcher les drags volontairement
+  // cross-row (le doigt doit franchement franchir le milieu).
+  // L'off-zone garde sa priorité (grande région, intention claire de bear-off).
+  const sourceIsTop = (drag.fromPt !== 'bar') && (drag.fromPt >= 13 && drag.fromPt <= 24);
+  const sourceIsBot = (drag.fromPt !== 'bar') && (drag.fromPt >= 1  && drag.fromPt <= 12);
+
+  let bestPt = null;
+  let bestScore = Infinity;
+  let offHit = false;
+
   for (const tpt of getValidTargets(drag.fromPt)) {
     if (combinedHazardous && tpt === combinedPt && tpt !== 0) continue;
     if (tpt === 0) {
@@ -4813,11 +5024,30 @@ function mouseDragged() {
           if (mockState.turn === 'black' && mouseY < halfH) inOff = true;
         }
       }
-      if (inOff) { drag.snapPt = 0; break; }
+      if (inOff) { offHit = true; break; }   // off-zone prioritaire
     } else {
-      if (abs(eMx - ptCenterX(tpt)) <= a / 2) { drag.snapPt = tpt; break; }
+      const cx = ptCenterX(tpt);
+      if (abs(eMx - cx) > a / 2) continue;          // hors tolérance X → pas candidat
+      // Y de référence du target : bord supérieur du plateau pour la rangée
+      // haute (13-24), bord inférieur pour la rangée basse (1-12). C'est ce
+      // qui départage les deux points qui partagent la même colonne X.
+      const targetIsTop = (tpt >= 13 && tpt <= 24);
+      const cy = targetIsTop ? by : (by + 13 * a);
+      const dx = eMx - cx;
+      const dy = mouseY - cy;
+      // Biais source-row : 0.6 sur Y si la cible est dans la même rangée
+      // que la source, 1.4 sinon. Bascule équateur → ~1.4a vers la rangée
+      // opposée. Aucun biais quand la source est sur la barre (pas de
+      // rangée d'origine).
+      let yWeight = 1.0;
+      if (sourceIsTop) yWeight = targetIsTop ? 0.6 : 1.4;
+      else if (sourceIsBot) yWeight = targetIsTop ? 1.4 : 0.6;
+      const score = dx * dx + yWeight * dy * dy;
+      if (score < bestScore) { bestScore = score; bestPt = tpt; }
     }
   }
+  if (offHit) drag.snapPt = 0;
+  else if (bestPt !== null) drag.snapPt = bestPt;
 }
 
 function mouseReleased() {
@@ -5009,8 +5239,11 @@ function _learnPointChevron(pt) {
   return chev;
 }
 function drawPointNumbers() {
-  textFont(fontSmall);
-  textSize(r * 0.55);
+  // Thème NORTECHICO (ou test via window.TRI_KATANA) : le chiffre de chaque case
+  // est remplacé par le glyphe katana (U+F8FF de nortechico, rendu via fontLarge
+  // car le @font-face CSS ne résout pas la zone privée — cf. drawNortechicoMark).
+  const katana = (typeof window !== 'undefined' && window.TRI_KATANA === true)
+              || (typeof userNick !== 'undefined' && userNick === 'NORTECHICO');
   textAlign(CENTER, CENTER);
   noStroke();
   fill(C.ivory);
@@ -5020,18 +5253,25 @@ function drawPointNumbers() {
     const cy = pt <= 12 ? by + 13*a + r*0.8 : by - r*0.8;
     let cx = ptCenterX(pt);
     if (mirrorMode) cx = mirrorX(cx);
-    // Mode LEARN : remplace temporairement le numéro par les chevrons en
-    // synchronisation avec le passage de la vague (même glow per-pt que
-    // drawLearnDirectionWave). Hors vague : numéro normal.
+    // Mode LEARN : pendant la vague, les chevrons priment sur tout.
     let label = String(pt);
+    // Katana : en permanence si mode global, sinon TEMPORAIREMENT sur la case
+    // distinguée (illuminée pendant le drag) — revient au chiffre au fondu.
+    let glyph = katana || ((_triAlpha[pt] || 0) > 40);
     if (learnActive) {
       const glow = getLearnDirectionGlow(pt);
       if (glow > 0) {
         const chev = _learnPointChevron(pt);
-        if (chev) label = chev;
+        if (chev) { label = chev; glyph = false; }
       }
     }
-    text(label, cx, cy);
+    if (glyph && fontLarge) {
+      textFont(fontLarge); textSize(r * 0.7);
+      text(NORTECHICO_GLYPH, cx, cy);
+    } else {
+      textFont(fontSmall); textSize(r * 0.55);
+      text(label, cx, cy);
+    }
   }
 }
 
@@ -5425,6 +5665,7 @@ function drawPlayerInfo() {
   resignBtn = null;
   cubeBtns  = { white: null, black: null };
   exitBtns  = [];
+  muteBtn   = null;
   nameBtns  = { white: null, black: null };
 
   if (diceOnSide) {
